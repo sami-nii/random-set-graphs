@@ -11,7 +11,7 @@ models_map = {
 def convert_to_lit_dataset(data):
     return LightningDataset(data)
 
-class LitGraphNN(L.LightningModule):
+class CredalWrapperGNN(L.LightningModule):
     def __init__(
         self,
         gnn_type: str,
@@ -47,6 +47,7 @@ class LitGraphNN(L.LightningModule):
     def forward(self, data):
         # Forward method to process node features and edges
         return self.model(data.x, data.edge_index)
+        # TODO add the credal wrapper here
 
     def training_step(self, batch, batch_idx):
         logits = self(batch)  # logits shape: [batch_size, num_classes]
