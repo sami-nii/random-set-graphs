@@ -9,7 +9,7 @@ sweep_cora = {
         "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-4},
         "gnn_type": {"values": ["GCN"]},
         "in_channels": {"values": [1433]},
-        "out_channels": {"values": [7]},
+        "out_channels": {"values": [3]},
         "patience": {"values": [30]},
     },
 }

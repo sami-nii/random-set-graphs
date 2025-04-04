@@ -16,7 +16,6 @@ def one_hot_encode(labels, num_classes):
 
 def dataset_loader(dataset_name: str):
     if dataset_name == 'cora':
-        
         # Load the Planetoid dataset (Cora)
         dataset = Planetoid(root=DATASET_STORAGE_PATH, name="Cora", split="full")
         dataset : torch_geometric.data.Data = dataset[0]  # there is only one graph in the dataset
@@ -25,7 +24,7 @@ def dataset_loader(dataset_name: str):
         OODclass = [0, 1, 2, 3]
         IDclass = [4, 5, 6]
 
-        # Clone the train and validation masks to avoid altering the original data
+        # Clone masks
         train_mask = dataset.train_mask.clone()
         val_mask = dataset.val_mask.clone()
         test_mask = dataset.test_mask.clone()
@@ -33,7 +32,7 @@ def dataset_loader(dataset_name: str):
         # Mask for OOD nodes
         ood_mask = torch.isin(dataset.y, torch.tensor(OODclass))
 
-        # Update train and validation masks to filter out OOD nodes
+        # Update masks to filter out OOD nodes for training and validation
         train_mask = train_mask & ~ood_mask
         val_mask = val_mask & ~ood_mask
 
@@ -42,26 +41,30 @@ def dataset_loader(dataset_name: str):
         val_data = dataset.subgraph(val_mask)
         test_data = dataset.subgraph(test_mask)
 
-        # The labels should be one-hot encoded
-
-        # onlt ID classes during training and validation
+        # One-hot encode labels for training and validation data (only ID classes)
         train_data.y = one_hot_encode(train_data.y - min(IDclass), len(IDclass))
         val_data.y = one_hot_encode(val_data.y - min(IDclass), len(IDclass))
-           
-        # Where the test data is OOD, we will set the label to 7
-        test_labels_ood = torch.isin(test_data.y, torch.tensor(OODclass))
-        test_labels = torch.where(test_labels_ood, torch.tensor(7), test_data.y)
+
+        # Encode labels for test data: one-hot for ID classes, all zero for OOD classes
         
-        # Create a one-hot encoding for ID classes
-        test_data.y = one_hot_encode(test_labels - min(IDclass), len(IDclass) + 1)  # +1 for the OOD class
+        is_ood_test = torch.isin(test_data.y, torch.tensor(OODclass))
+
+        # Initialize test labels to zeros
+        test_labels_encoded = torch.zeros((test_data.y.size(0), len(IDclass)))
+
+        # Encode ID class nodes in test data
+        id_test_indices = (~is_ood_test).nonzero(as_tuple=True)[0]
+        test_labels_encoded[id_test_indices] = one_hot_encode(
+            test_data.y[id_test_indices] - min(IDclass), len(IDclass)
+        )
+
+        test_data.y = test_labels_encoded
 
         train_data.validate()
         val_data.validate()
         test_data.validate()
 
         return train_data, val_data, test_data
-    
+
     else:
         raise ValueError(f"Dataset {dataset_name} not supported")
-    
- 

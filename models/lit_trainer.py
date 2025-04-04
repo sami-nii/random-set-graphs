@@ -3,9 +3,10 @@ import wandb
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from lit_wrapper import LitGraphNN
+from lit_wrapper import CredalGNN
 import os
 import sys
+from torch_geometric.loader import DataLoader
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.dataset_loader import dataset_loader
 
@@ -22,7 +23,7 @@ def train():
     wandb_logger = WandbLogger(project=PROJECT_NAME)
 
     # Instantiate the model
-    model = LitGraphNN(
+    model = CredalGNN(
         gnn_type=config["gnn_type"],
         in_channels=config["in_channels"],
         out_channels=config["out_channels"],
@@ -44,7 +45,11 @@ def train():
     )
 
     # Load the dataset
-    train_loader, val_loader, test_loader = dataset_loader("cora")
+    train_data, val_data, test_data = dataset_loader("cora")
+    train_loader = DataLoader([train_data], batch_size=config["batch_size"], shuffle=True)
+    val_loader = DataLoader([val_data], batch_size=config["batch_size"], shuffle=False)
+    test_loader = DataLoader([test_data], batch_size=config["batch_size"], shuffle=False)
+
 
     # Train and validate the model
     trainer.fit(model, train_loader, val_loader)
