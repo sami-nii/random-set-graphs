@@ -50,11 +50,7 @@ def train():
     )
 
     # Load the dataset
-    train_data, val_data, test_data = dataset_loader("cora")
-    train_loader = DataLoader([train_data], batch_size=config["batch_size"], shuffle=True)
-    val_loader = DataLoader([val_data], batch_size=config["batch_size"], shuffle=False)
-    test_loader = DataLoader([test_data], batch_size=config["batch_size"], shuffle=False)
-
+    train_loader, val_loader, test_loader = dataset_loader("cora", config)
 
     # Train and validate the model
     trainer.fit(model, train_loader, val_loader)

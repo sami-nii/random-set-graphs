@@ -7,14 +7,14 @@ import torch
 import torch.nn.functional as F
 
 
-DATASET_STORAGE_PATH = "../dataset/"
+DATASET_STORAGE_PATH = "./dataset/"
 
 
 def one_hot_encode(labels, num_classes):
     """One-hot encode a tensor of labels."""
     return F.one_hot(labels, num_classes=num_classes).float()
 
-def dataset_loader(dataset_name: str):
+def dataset_loader(dataset_name: str, config):
     if dataset_name == 'cora':
         # Load the Planetoid dataset (Cora)
         dataset = Planetoid(root=DATASET_STORAGE_PATH, name="Cora", split="full")
@@ -64,7 +64,11 @@ def dataset_loader(dataset_name: str):
         val_data.validate()
         test_data.validate()
 
-        return train_data, val_data, test_data
+        train_loader = DataLoader([train_data], batch_size=config["batch_size"], shuffle=True)
+        val_loader = DataLoader([val_data], batch_size=config["batch_size"], shuffle=False)
+        test_loader = DataLoader([test_data], batch_size=config["batch_size"], shuffle=False)
+
+        return train_loader, val_loader, test_loader
 
     else:
         raise ValueError(f"Dataset {dataset_name} not supported")

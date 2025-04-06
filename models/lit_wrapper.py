@@ -133,7 +133,7 @@ class CredalGNN(L.LightningModule):
         # Initialize GNN model weights
         for m in self.gnn_model.modules():
             if isinstance(m, nn.Linear):
-                if self.gnn_model.act == F.relu6:
+                if (self.gnn_model.act == F.relu6) or (self.gnn_model.act == F.relu):
                     nn.init.kaiming_uniform_(m.weight, nonlinearity='relu')
                 else:
                     nn.init.xavier_uniform_(m.weight)
