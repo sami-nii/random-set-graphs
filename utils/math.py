@@ -1,4 +1,6 @@
 import torch
+from .solvers import calculate_entropy
+import numpy as np
 
 def interval_softmax(a_L, a_U):
     """
@@ -35,17 +37,17 @@ def actually_reachable(q_L, q_U):
     Compute the actually reachable interval probabilities q_L_star and q_U_star.
 
     Args:
-        q_L (torch.Tensor): Lower interval probabilities, shape (num_nodes, C) or (C,)
-        q_U (torch.Tensor): Upper interval probabilities, shape (num_nodes, C) or (C,)
+        q_L (np.ndarray): Lower interval probabilities, shape (num_nodes, C) or (C,)
+        q_U (np.ndarray): Upper interval probabilities, shape (num_nodes, C) or (C,)
 
     Returns:
         tuple: (q_L_star, q_U_star), reachable interval probabilities, each of shape (num_nodes, C) or (C,)
     """
-    sum_q_L = torch.sum(q_L, dim=-1, keepdim=True)
-    sum_q_U = torch.sum(q_U, dim=-1, keepdim=True)
+    sum_q_L = np.sum(q_L, axis=-1, keepdims=True)
+    sum_q_U = np.sum(q_U, axis=-1, keepdims=True)
 
-    q_L_star = torch.maximum(q_L, 1 - (sum_q_U - q_U))
-    q_U_star = torch.minimum(q_U, 1 - (sum_q_L - q_L))
+    q_L_star = np.maximum(q_L, 1 - (sum_q_U - q_U))
+    q_U_star = np.minimum(q_U, 1 - (sum_q_L - q_L))
 
     return q_L_star, q_U_star
 
@@ -83,5 +85,62 @@ def checker(q_L, q_U, a_L, a_U):
     Raises:
         AssertionError: If the conditions are not met.
     """
-    for i in range(q_L.shape[0]):
-        assert torch.all(q_L[i] <= q_U[i]), f"Lower bounds must be less than or equal to upper bounds. Got {q_L[i]} and {q_U[i]}, a was {a_L[i]} and {a_U[i]}"
+
+    if isinstance(q_L, torch.Tensor):
+        for i in range(q_L.shape[0]):
+            assert torch.all(q_L[i] <= q_U[i]), f"Lower bounds must be less than or equal to upper bounds. Got {q_L[i]} and {q_U[i]}, a was {a_L[i]} and {a_U[i]}"
+    else:
+        for i in range(q_L.shape[0]):
+            assert np.all(q_L[i] <= q_U[i]), f"Lower bounds must be less than or equal to upper bounds. Got {q_L[i]} and {q_U[i]}, a was {a_L[i]} and {a_U[i]}"
+
+def compute_uncertainties(q_L, q_U):
+    """
+    Compute uncertainty based on the interval probabilities bounds by computing the actually reacheable
+    probabilities and calculating the entropies.
+
+    Args:
+        q_L (np.ndarray): Lower bound probabilities.
+        q_U (np.ndarray): Upper bound probabilities.
+
+    Returns:
+        TU, AU, EU (tuple[np.Array]): where TU is total uncertainty, AU is aleatoric uncertainty, and EU is epistemic uncertainty.
+    """
+    # Ensure tensors have the same shape
+    assert isinstance(q_L, np.ndarray) and isinstance(q_U, np.ndarray), f"q_L and q_U must be numpy arrays, but got {type(q_L)} and {type(q_U)}"
+    assert q_L.shape == q_U.shape, f"Shapes of q_L and q_U must match, but got {q_L.shape} and {q_U.shape}"
+    assert len(q_L.shape) == 2, f"q_L and q_U must be 2D tensors, but got shapes {q_L.shape} and {q_U.shape}"
+
+    q_L_star, q_U_star = actually_reachable(q_L, q_U) # shape: [num_nodes, C] each
+    
+    assert np.all(q_L_star <= q_U_star + 1e-6), "Lower bounds must be less than or equal to upper bounds"
+
+    _, TU = calculate_entropy(q_L_star, q_U_star, "maximize") 
+    _, AU = calculate_entropy(q_L_star, q_U_star, "minimize")
+    EU = TU - AU
+
+    return TU, AU, EU
+
+
+def find_eu_threshold(y: np.ndarray, EU: np.ndarray, id_percentile=95.0):
+    """
+    Finds an epistemic uncertainty (EU) threshold based on ID samples.
+    Compute the threshold to apply to the EU values to classify id_percentile of ID samples correctly.
+    Samples with EU above this threshold should be considered OOD.
+
+    Args:
+        y (np.ndarray): (num_samples, num_classes) ground truth one-hot vectors.
+                        All zeroes indicate OOD samples.
+        EU (np.ndarray): (num_samples,) Epistemic uncertainty values.
+        id_percentile (float): Percentile to retain ID samples (default 95).
+
+    Returns:
+        threshold (float): The EU threshold.
+    """
+    # ID samples have at least one class label == 1
+    id_mask = np.sum(y, axis=1) > 0  # shape: (num_samples,)
+    EU_id = EU[id_mask]
+
+    # Compute threshold at the given percentile
+    threshold = np.percentile(EU_id, id_percentile)
+
+    return threshold

@@ -30,7 +30,8 @@ def train():
         hidden_channels=config["hidden_channels"],
         num_layers=config["num_layers"],
         lr=config["lr"],
-        weight_decay=config["weight_decay"]
+        weight_decay=config["weight_decay"],
+        delta=config["delta"],
     )
 
     # Trainer setup
@@ -38,10 +39,14 @@ def train():
         devices="auto",
         accelerator="auto",
         logger=wandb_logger,
+        log_every_n_steps=1,
         callbacks=[
             EarlyStopping(monitor="val_loss", patience=config["patience"]),
             # ModelCheckpoint(monitor="val_loss", save_top_k=1, mode="min", filename="{epoch:02d}-{val_loss:.4f}"),
         ],
+        limit_train_batches=config["batch_size"],
+        limit_val_batches=config["batch_size"],
+        limit_test_batches=config["batch_size"],
     )
 
     # Load the dataset
@@ -54,13 +59,8 @@ def train():
     # Train and validate the model
     trainer.fit(model, train_loader, val_loader)
 
-    # Run final validation to log the best accuracy
-    val_acc = trainer.validate(model, val_loader)[0]["val_acc"] # TODO load the best model instead of the last one
-    wandb_logger.log_metrics({"sweep_score": float(val_acc)})  
-
-    # Run testing and log results
-    test_results = trainer.test(model, test_loader)
-    wandb_logger.log_metrics({"test_loss": test_results[0]["test_loss"], "test_acc": test_results[0]["test_acc"]})
+    # Test the model
+    trainer.test(model, test_loader)
 
     # Finalize the wandb run
     wandb.finish()

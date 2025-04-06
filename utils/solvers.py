@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import minimize
 from scipy.optimize import linprog
+from tqdm import tqdm
 
 
 
@@ -16,7 +17,7 @@ def initial_guess(l, u, delta=1e-5):
         np.ndarray: Initial guess for the optimization problem.
     """
     assert len(l) == len(u), "Lower and upper bounds must have the same length"
-    assert np.all(l <= u), "Lower bounds must be less than or equal to upper bounds"
+    assert np.all(l <= u + 1e-6), "Lower bounds must be less than or equal to upper bounds"
 
     n = len(l)
     c = np.zeros(n)
@@ -45,7 +46,7 @@ def calculate_entropy(lower_bound, upper_bound, direction):
         direction (str): "maximize" or "minimize".
 
     Returns:
-        tuple: (optimal_probabilities, entropy_values) both with shape (num_nodes, C) and (num_nodes,) respectively.
+        tuple: (optimal_probabilities, entropy_values) both with shape (num_nodes, C).
 
     Raises:
         ValueError: If initial guess cannot be generated.
@@ -53,7 +54,7 @@ def calculate_entropy(lower_bound, upper_bound, direction):
 
     assert lower_bound.shape == upper_bound.shape, "Lower and upper bounds must have the same shape"
     assert direction in ["maximize", "minimize"], "Direction must be either 'maximize' or 'minimize'"
-    assert np.all(lower_bound <= upper_bound), "Lower bounds must be less than or equal to upper bounds"
+    assert np.all(lower_bound <= upper_bound + 1e-6), "Lower bounds must be less than or equal to upper bounds"
     assert len(lower_bound.shape) == 2, "Lower and upper bounds must be 2D arrays"
 
     def entropy(q):
@@ -61,13 +62,13 @@ def calculate_entropy(lower_bound, upper_bound, direction):
 
     def constraint_sum(q):
         return np.sum(q) - 1
-
+    
 
     num_nodes, C = lower_bound.shape
     optimal_probabilities = np.zeros((num_nodes, C))
     entropy_values = np.zeros(num_nodes)
 
-    for node_idx in range(num_nodes):
+    for node_idx in tqdm(range(num_nodes), desc=f"Calculating entropy ({direction})", total=num_nodes):
         lb = lower_bound[node_idx]
         ub = upper_bound[node_idx]
 
