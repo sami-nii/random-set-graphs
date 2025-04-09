@@ -9,7 +9,7 @@ import sys
 from torch_geometric.loader import DataLoader
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from dataset_loader.dataset_loader import dataset_loader
-from sweeps.sweeps import sweep_cora, sweep_ogb_arxiv_year, sweep_squirrel, sweep_chameleon
+from sweeps.sweeps import sweep_cora, sweep_ogb_arxiv_year, sweep_squirrel, sweep_chameleon, sweep_snap_patents
 import argparse
 
 # Set the project name for wandb
@@ -21,7 +21,7 @@ parser = argparse.ArgumentParser(description="Run a sweep for a specific dataset
 parser.add_argument(
     "-d", "--dataset",
     type=str,
-    choices=["cora", "ogb_arxiv_year", "squirrel", "chameleon"],
+    choices=["cora", "ogb_arxiv_year", "squirrel", "chameleon", "snap_patents"],
     default="squirrel",
     help="Dataset to run the sweep on.",
 )
@@ -88,6 +88,8 @@ if __name__ == "__main__":
         sweep = sweep_squirrel
     elif DATASET == "chameleon":
         sweep = sweep_chameleon
+    elif DATASET == "snap_patents":
+        sweep = sweep_snap_patents
     else:
         raise ValueError(f"Unsupported dataset: {DATASET}")
 

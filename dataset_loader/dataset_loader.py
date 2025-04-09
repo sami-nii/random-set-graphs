@@ -2,6 +2,7 @@ from dataset_loader.loader_cora import loader_cora
 from dataset_loader.loader_ogb_arxiv_year import load_ogb_arxiv_year
 from dataset_loader.loader_squirrel import laoder_squirrel
 from dataset_loader.loader_chameleon import laoder_chameleon
+from dataset_loader.loader_snap_patents import loader_snap_patents
 
 
 DATASET_STORAGE_PATH = "./dataset/"
@@ -16,5 +17,7 @@ def dataset_loader(dataset_name: str, config):
         return laoder_squirrel(DATASET_STORAGE_PATH, config)
     elif dataset_name == 'chameleon':
         return laoder_chameleon(DATASET_STORAGE_PATH, config)
+    elif dataset_name == 'snap_patents':
+        return loader_snap_patents(DATASET_STORAGE_PATH, config)
     else:
         raise ValueError(f"Dataset {dataset_name} not supported")
