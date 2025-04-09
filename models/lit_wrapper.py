@@ -1,7 +1,7 @@
 import torch
 from torch_geometric.data.lightning import LightningDataset
 import lightning as L
-from torch_geometric.nn.models import GCN
+from torch_geometric.nn.models import GCN, GraphSAGE, GAT, GIN, EdgeCNN
 from typing import Optional
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,11 +9,16 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.solvers import calculate_entropy
-from utils.math import interval_softmax, cross_entropy_loss, compute_uncertainties, find_eu_threshold, checker
+from utils.math import interval_softmax, cross_entropy_loss, compute_uncertainties, checker
 from ood_metrics import auroc, fpr_at_95_tpr
+from torchmetrics import AUROC
 
 models_map = {
     "GCN": GCN,  # GCN is built-in in torch_geometric
+    "SAGE": GraphSAGE,  # SAGE is built-in in torch_geometric
+    "GAT": GAT,  # GAT is built-in in torch_geometric
+    "GIN": GIN,  # GIN is built-in in torch_geometric
+    "EdgeCNN": EdgeCNN,  # EdgeCNN is built-in in torch_geometric
 }
 
 def convert_to_lit_dataset(data):
@@ -40,7 +45,7 @@ class CredalGNN(L.LightningModule):
             hidden_channels=hidden_channels,
             num_layers=num_layers,
             out_channels=hidden_channels,
-            act=F.relu6,
+            act=F.sigmoid,
             **kwargs,
         )
 
@@ -48,8 +53,6 @@ class CredalGNN(L.LightningModule):
 
         # credal wrapper will be a MLP 
         self.credal_layer_model = CredalLayer(input_dim=hidden_channels, C=out_channels)
-
-        self._initialize_weights()
 
         # Cross-Entropy Loss for multi-class classification
         self.criterion = CreNetLoss(delta=delta) # TODO add as hyperparameter
@@ -60,6 +63,8 @@ class CredalGNN(L.LightningModule):
 
         # Save hyperparameters
         self.save_hyperparameters()
+
+        self.apply(self.weights_init)
 
     def forward(self, data):
         # Forward method to process node features and edges
@@ -78,31 +83,48 @@ class CredalGNN(L.LightningModule):
         
         q_L, q_U = self(batch)  # shape: [num_nodes, 2*C]
 
+        mean_difference = (q_U - q_L).mean()
+
         loss = self.criterion(q_L, q_U, batch.y) 
 
-        accuracy = (torch.argmax(q_U, dim=1) == torch.argmax(batch.y, dim=1)).float().mean()
+        accuracy_U = (torch.argmax(q_U, dim=1) == torch.argmax(batch.y, dim=1)).float().mean()
+        accuracy_L = (torch.argmax(q_L, dim=1) == torch.argmax(batch.y, dim=1)).float().mean()
 
         # Logging
         self.log("train_loss", loss)
-        self.log("train_acc", accuracy)
+        self.log("train_mean_difference", mean_difference)
+        self.log("train_acc_U", accuracy_U)
+        self.log("train_acc_L", accuracy_L)
         return loss
 
     def validation_step(self, batch, batch_idx):
         
         q_L, q_U = self(batch)  # shape: [num_nodes, C] each
 
+        mean_difference = (q_U - q_L).mean()
+
+        # print mean and std of q_L and q_U
+        print(f"q_L mean: {q_L.mean()}, q_L std: {q_L.std()}")
+        print(f"q_U mean: {q_U.mean()}, q_U std: {q_U.std()}")
+
         loss = self.criterion(q_L, q_U, batch.y) 
 
-        accuracy = (torch.argmax(q_U, dim=1) == torch.argmax(batch.y, dim=1)).float().mean()
+        accuracy_U = (torch.argmax(q_U, dim=1) == torch.argmax(batch.y, dim=1)).float().mean()
+        accuracy_L = (torch.argmax(q_L, dim=1) == torch.argmax(batch.y, dim=1)).float().mean()
 
         # Logging
         self.log("val_loss", loss)
-        self.log("val_acc", accuracy)
+        self.log("val_acc_U", accuracy_U)
+        self.log("val_mean_difference", mean_difference)
+        self.log("val_acc_L", accuracy_L)
         return loss
 
     def test_step(self, batch, batch_idx):
         
         q_L, q_U = self(batch)  # shape: [num_nodes, C] each
+
+        # TODO check if the elements of q_L and q_U can be negative, it seems strange since they are probabilities
+
         
         loss = self.criterion(q_L, q_U, batch.y)  
 
@@ -110,11 +132,24 @@ class CredalGNN(L.LightningModule):
         q_U = q_U.detach().cpu().numpy()
         batch.y = batch.y.detach().cpu().numpy()
 
-        AU, TU, EU = compute_uncertainties(q_L, q_U) 
+        TU, AU, EU = compute_uncertainties(q_L, q_U) 
 
+        # print(f"AU: {AU.mean()}, TU: {TU.mean()}, EU: {EU.mean()}")
+        # TODO check why the AU is -TU
+        # TODO check it AU and TU can be negative
+        # TODO it seems that there are nan values sometimes
+
+        auroc = AUROC(task="binary")
+
+        # normalize the EU values to be between 0 and 1
+        # EU = (EU - EU.min()) / (EU.max() - EU.min()) # TODO check if this is needed
+
+        # auroc_score = auroc(torch.as_tensor(EU), torch.as_tensor(1 - batch.y.sum(axis=1)))
         # print(f"AU: {AU}, TU: {TU}, EU: {EU}")
+
         
-        auroc_score = auroc(-EU, batch.y.sum(axis=1))
+        auroc_score = auroc(torch.from_numpy(EU), torch.from_numpy(1 - batch.y.sum(axis=1)))
+
         fpr_95 = fpr_at_95_tpr(-EU, batch.y.sum(axis=1))
         
         # Logging
@@ -146,6 +181,12 @@ class CredalGNN(L.LightningModule):
                 nn.init.kaiming_uniform_(m.weight, nonlinearity='relu')
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+    
+    def weights_init(self, m):
+        print(f"Initializing weights for {m.__class__.__name__}")
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            nn.init.zeros_(m.bias)
 
 class CredalLayer(torch.nn.Module):
     """
@@ -159,7 +200,7 @@ class CredalLayer(torch.nn.Module):
             The number of classes in output
     """
 
-    def __init__(self, input_dim, C, margin=1e-4):
+    def __init__(self, input_dim, C, margin=0.0):
         super().__init__()
 
         self.C = C
@@ -185,8 +226,8 @@ class CredalLayer(torch.nn.Module):
         h = mh[:, C:]  # Half-size of the interval
         
         # Split into m-part and h-part
-        m = F.relu6(m)  # TODO is sigmoid the right choice?
-        h = F.relu6(h) 
+        m = F.sigmoid(m)  # TODO is sigmoid the right choice?
+        h = F.sigmoid(h) 
 
         # Calculate the interval boundaries
         a_L = m - h - self.margin # Lower bounds
@@ -196,7 +237,7 @@ class CredalLayer(torch.nn.Module):
 
         q_L, q_U = interval_softmax(a_L, a_U)
         
-        assert torch.all(q_L <= q_U), f"Lower bounds must be less than or equal to upper bounds."
+        # assert torch.all(q_L <= q_U), f"Lower bounds must be less than or equal to upper bounds."
         return q_L, q_U  
 
 

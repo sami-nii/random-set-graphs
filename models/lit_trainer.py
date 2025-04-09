@@ -8,10 +8,27 @@ import os
 import sys
 from torch_geometric.loader import DataLoader
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from utils.dataset_loader import dataset_loader
+from dataset_loader.dataset_loader import dataset_loader
+from sweeps.sweeps import sweep_cora, sweep_ogb_arxiv_year, sweep_squirrel, sweep_chameleon
+import argparse
 
 # Set the project name for wandb
 PROJECT_NAME = "graph-uncertainty"
+
+# Set the dataset name with argument parsing
+parser = argparse.ArgumentParser(description="Run a sweep for a specific dataset.")
+
+parser.add_argument(
+    "-d", "--dataset",
+    type=str,
+    choices=["cora", "ogb_arxiv_year", "squirrel", "chameleon"],
+    default="squirrel",
+    help="Dataset to run the sweep on.",
+)
+
+args = parser.parse_args()
+
+DATASET = args.dataset
 
 
 def train():
@@ -50,7 +67,7 @@ def train():
     )
 
     # Load the dataset
-    train_loader, val_loader, test_loader = dataset_loader("cora", config)
+    train_loader, val_loader, test_loader = dataset_loader(DATASET, config)
 
     # Train and validate the model
     trainer.fit(model, train_loader, val_loader)
@@ -63,8 +80,18 @@ def train():
 
 # Execute the experiment
 if __name__ == "__main__":
-    from sweeps.sweep_cora import sweep_cora
-    sweep_id = wandb.sweep(sweep=sweep_cora, project=PROJECT_NAME)
+    if DATASET == "cora":
+        sweep = sweep_cora
+    elif DATASET == "ogb_arxiv_year":
+        sweep = sweep_ogb_arxiv_year
+    elif DATASET == "squirrel":
+        sweep = sweep_squirrel
+    elif DATASET == "chameleon":
+        sweep = sweep_chameleon
+    else:
+        raise ValueError(f"Unsupported dataset: {DATASET}")
+
+    sweep_id = wandb.sweep(sweep=sweep, project=PROJECT_NAME)
     wandb.agent(sweep_id, function=train)
 
     
