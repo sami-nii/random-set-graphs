@@ -26,6 +26,13 @@ parser.add_argument(
     help="Dataset to run the sweep on.",
 )
 
+parser.add_argument(
+    "-s",
+    type=str,
+    default="",
+    help="sweep id to run",
+)
+
 args = parser.parse_args()
 
 DATASET = args.dataset
@@ -61,9 +68,6 @@ def train():
             EarlyStopping(monitor="val_loss", patience=config["patience"]),
             # ModelCheckpoint(monitor="val_loss", save_top_k=1, mode="min", filename="{epoch:02d}-{val_loss:.4f}"),
         ],
-        limit_train_batches=config["batch_size"],
-        limit_val_batches=config["batch_size"],
-        limit_test_batches=config["batch_size"],
     )
 
     # Load the dataset
@@ -93,7 +97,11 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Unsupported dataset: {DATASET}")
 
-    sweep_id = wandb.sweep(sweep=sweep, project=PROJECT_NAME)
+    if args.s:
+        sweep_id = args.s
+    else:
+        sweep_id = wandb.sweep(sweep=sweep, project=PROJECT_NAME)
+    
     wandb.agent(sweep_id, function=train)
 
     

@@ -83,40 +83,32 @@ class CredalGNN(L.LightningModule):
         
         q_L, q_U = self(batch)  # shape: [num_nodes, 2*C]
 
-        mean_difference = (q_U - q_L).mean()
-
         loss = self.criterion(q_L, q_U, batch.y) 
 
         accuracy_U = (torch.argmax(q_U, dim=1) == torch.argmax(batch.y, dim=1)).float().mean()
         accuracy_L = (torch.argmax(q_L, dim=1) == torch.argmax(batch.y, dim=1)).float().mean()
 
+        batch_size = batch.y.shape[0]
         # Logging
-        self.log("train_loss", loss)
-        self.log("train_mean_difference", mean_difference)
-        self.log("train_acc_U", accuracy_U)
-        self.log("train_acc_L", accuracy_L)
+        self.log("train_loss", loss, batch_size=batch_size)
+        self.log("train_acc_U", accuracy_U, batch_size=batch_size)
+        self.log("train_acc_L", accuracy_L, batch_size=batch_size)
         return loss
 
     def validation_step(self, batch, batch_idx):
         
         q_L, q_U = self(batch)  # shape: [num_nodes, C] each
 
-        mean_difference = (q_U - q_L).mean()
-
-        # print mean and std of q_L and q_U
-        print(f"q_L mean: {q_L.mean()}, q_L std: {q_L.std()}")
-        print(f"q_U mean: {q_U.mean()}, q_U std: {q_U.std()}")
-
         loss = self.criterion(q_L, q_U, batch.y) 
 
         accuracy_U = (torch.argmax(q_U, dim=1) == torch.argmax(batch.y, dim=1)).float().mean()
         accuracy_L = (torch.argmax(q_L, dim=1) == torch.argmax(batch.y, dim=1)).float().mean()
 
+        batch_size = batch.y.shape[0]
         # Logging
-        self.log("val_loss", loss)
-        self.log("val_acc_U", accuracy_U)
-        self.log("val_mean_difference", mean_difference)
-        self.log("val_acc_L", accuracy_L)
+        self.log("val_loss", loss, batch_size=batch_size)
+        self.log("val_acc_U", accuracy_U, batch_size=batch_size)
+        self.log("val_acc_L", accuracy_L, batch_size=batch_size)
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -125,7 +117,6 @@ class CredalGNN(L.LightningModule):
 
         # TODO check if the elements of q_L and q_U can be negative, it seems strange since they are probabilities
 
-        
         loss = self.criterion(q_L, q_U, batch.y)  
 
         q_L = q_L.detach().cpu().numpy()
@@ -134,7 +125,7 @@ class CredalGNN(L.LightningModule):
 
         TU, AU, EU = compute_uncertainties(q_L, q_U) 
 
-        # print(f"AU: {AU.mean()}, TU: {TU.mean()}, EU: {EU.mean()}")
+        print(f"AU: {AU.mean()}, TU: {TU.mean()}, EU: {EU.mean()}")
         # TODO check why the AU is -TU
         # TODO check it AU and TU can be negative
         # TODO it seems that there are nan values sometimes
@@ -147,13 +138,16 @@ class CredalGNN(L.LightningModule):
         # auroc_score = auroc(torch.as_tensor(EU), torch.as_tensor(1 - batch.y.sum(axis=1)))
         # print(f"AU: {AU}, TU: {TU}, EU: {EU}")
 
-        
-        auroc_score = auroc(torch.from_numpy(EU), torch.from_numpy(1 - batch.y.sum(axis=1)))
+        auroc_score_EU = auroc(torch.from_numpy(EU), torch.from_numpy(1 - batch.y.sum(axis=1)))
+        auroc_score_AU = auroc(torch.from_numpy(AU), torch.from_numpy(1 - batch.y.sum(axis=1)))
+        auroc_score_TU = auroc(torch.from_numpy(TU), torch.from_numpy(1 - batch.y.sum(axis=1)))
 
         fpr_95 = fpr_at_95_tpr(-EU, batch.y.sum(axis=1))
         
         # Logging
-        self.log("test_auroc", auroc_score)
+        self.log("test_auroc", auroc_score_EU) # the "standard" auroc is the one computed with epistemic uncertainty
+        self.log("test_auroc_AU", auroc_score_AU)
+        self.log("test_auroc_TU", auroc_score_TU)
         self.log("test_fpr_95", fpr_95)
         return loss
 
@@ -162,28 +156,8 @@ class CredalGNN(L.LightningModule):
             self.parameters(), lr=self.lr, weight_decay=self.weight_decay
         )
         return optimizer
-    
-    def _initialize_weights(self):
-        """Apply Kaiming initialization for ReLU and Xavier for tanh."""
-        # Initialize GNN model weights
-        for m in self.gnn_model.modules():
-            if isinstance(m, nn.Linear):
-                if (self.gnn_model.act == F.relu6) or (self.gnn_model.act == F.relu):
-                    nn.init.kaiming_uniform_(m.weight, nonlinearity='relu')
-                else:
-                    nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-
-        # Initialize Credal layer weights
-        for m in self.credal_layer_model.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.kaiming_uniform_(m.weight, nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-    
+     
     def weights_init(self, m):
-        print(f"Initializing weights for {m.__class__.__name__}")
         if isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight)
             nn.init.zeros_(m.bias)

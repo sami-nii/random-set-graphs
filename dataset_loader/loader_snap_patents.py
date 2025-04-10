@@ -5,6 +5,7 @@ import torch
 from torch_geometric.loader import DataLoader
 from .utils import one_hot_encode, even_quantile_labels
 import scipy
+from torch_geometric.loader import NeighborLoader
 
 
 def loader_snap_patents(DATASET_STORAGE_PATH, config):
@@ -87,8 +88,17 @@ def loader_snap_patents(DATASET_STORAGE_PATH, config):
     )
     test_data.y = test_labels_encoded
 
-    train_loader = DataLoader([train_data], batch_size=config["batch_size"], shuffle=True)
-    val_loader = DataLoader([val_data], batch_size=config["batch_size"], shuffle=False)
-    test_loader = DataLoader([test_data], batch_size=config["batch_size"], shuffle=False)
+    
+    if config["batch_size"] <= 0 and config["num_neighbors"] <= 0: # full graph in a single batch
+        train_loader = DataLoader([train_data], batch_size=1, shuffle=False)
+    else:
+        train_loader = NeighborLoader(
+            train_data,
+            batch_size=config["batch_size"] if config["batch_size"] > 0 else train_data.num_nodes,
+            num_neighbors=[int(config['num_neighbors'])] * int(config["num_layers"]),
+        )
+
+    val_loader = DataLoader([val_data], batch_size=1, shuffle=False)
+    test_loader = DataLoader([test_data], batch_size=1, shuffle=False)
 
     return train_loader, val_loader, test_loader

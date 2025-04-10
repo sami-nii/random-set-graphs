@@ -114,8 +114,8 @@ def compute_uncertainties(q_L, q_U):
     
     assert np.all(q_L_star <= q_U_star + 1e-6), "Lower bounds must be less than or equal to upper bounds"
 
-    _, TU = calculate_entropy(q_L_star, q_U_star, "maximize") 
-    _, AU = calculate_entropy(q_L_star, q_U_star, "minimize")
+    AU, TU = calculate_entropy(q_L_star, q_U_star) 
+    
     EU = TU - AU
 
     return TU, AU, EU
