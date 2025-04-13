@@ -2,7 +2,7 @@ from dataset_loader.loader_cora import loader_cora
 from dataset_loader.loader_ogb_arxiv_year import load_ogb_arxiv_year
 from dataset_loader.loader_squirrel import laoder_squirrel
 from dataset_loader.loader_chameleon import laoder_chameleon
-from dataset_loader.loader_snap_patents import loader_snap_patents
+from dataset_loader.loader_snap_patents_year import loader_snap_patents
 
 
 DATASET_STORAGE_PATH = "./dataset/"

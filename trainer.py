@@ -3,7 +3,7 @@ import wandb
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from lit_wrapper import CredalGNN
+from models.backbone_GNN import UncertaintyGNN
 import os
 import sys
 from torch_geometric.loader import DataLoader
@@ -22,7 +22,7 @@ parser.add_argument(
     "-d", "--dataset",
     type=str,
     choices=["cora", "ogb_arxiv_year", "squirrel", "chameleon", "snap_patents"],
-    default="squirrel",
+    default="cora",
     help="Dataset to run the sweep on.",
 )
 
@@ -47,7 +47,7 @@ def train():
     wandb_logger = WandbLogger(project=PROJECT_NAME)
 
     # Instantiate the model
-    model = CredalGNN(
+    model = UncertaintyGNN(
         gnn_type=config["gnn_type"],
         in_channels=config["in_channels"],
         out_channels=config["out_channels"],
