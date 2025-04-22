@@ -3,9 +3,10 @@ import torch
 from torch_geometric.loader import DataLoader
 from .utils import one_hot_encode
 from torch_geometric.datasets import WikipediaNetwork
+from torch_geometric.data import Data
 
 
-def laoder_squirrel(DATASET_STORAGE_PATH, config):
+def laoder_squirrel(DATASET_STORAGE_PATH, config, split_test):
     dataset = WikipediaNetwork(root=DATASET_STORAGE_PATH, name='squirrel')
     dataset = dataset[0]  # there is only one graph in the dataset
 
@@ -56,4 +57,35 @@ def laoder_squirrel(DATASET_STORAGE_PATH, config):
     val_loader = DataLoader([val_data], batch_size=config["batch_size"], shuffle=False)
     test_loader = DataLoader([test_data], batch_size=config["batch_size"], shuffle=False)
 
-    return train_loader, val_loader, test_loader
+    if split_test:
+        num_nodes = test_data.num_nodes
+        all_indices = torch.randperm(num_nodes)
+        half = num_nodes // 2
+
+        idx_1 = all_indices[:half]
+        idx_2 = all_indices[half:]
+
+        # Get subgraphs for each half
+        edge_index_1, _ = subgraph(idx_1, test_data.edge_index, relabel_nodes=True)
+        edge_index_2, _ = subgraph(idx_2, test_data.edge_index, relabel_nodes=True)
+
+        data_1 = Data(
+            x=test_data.x[idx_1],
+            edge_index=edge_index_1,
+            y=test_data.y[idx_1]
+        )
+
+        data_2 = Data(
+            x=test_data.x[idx_2],
+            edge_index=edge_index_2,
+            y=test_data.y[idx_2]
+        )
+
+        OOD_train_loader = DataLoader([data_1], batch_size=1, shuffle=False),
+        OOD_test_loader = DataLoader([data_2], batch_size=1, shuffle=False)
+        
+        return train_loader, val_loader, OOD_train_loader, OOD_test_loader
+    else:
+        # Return the loaders for training, validation, and test
+        return train_loader, val_loader, test_loader
+

@@ -1,7 +1,6 @@
 sweep_cora = {
-    "name": "cora",
     "method": "bayes",
-    "metric": {"name": "test_auroc", "goal": "maximize"},
+    "metric": {"name": "val_f1", "goal": "maximize"},
     "parameters": {
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
         "hidden_channels": {"values": [64, 128, 256, 512]},
@@ -17,9 +16,8 @@ sweep_cora = {
 }
 
 sweep_ogb_arxiv_year = {
-    "name": "ogb_arxiv_year",
     "method": "bayes",
-    "metric": {"name": "test_auroc", "goal": "maximize"},
+    "metric": {"name": "val_f1", "goal": "maximize"},
     "parameters": {
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
         "hidden_channels": {"values": [64, 128, 256, 512]},
@@ -34,17 +32,15 @@ sweep_ogb_arxiv_year = {
     }
 }
 
-sweep_squirrel = {
-    "name": "squirrel",
+sweep_squirrel_vanilla = {
     "method": "bayes",
-    "metric": {"name": "test_auroc", "goal": "maximize"},
+    "metric": {"name": "val_f1", "goal": "maximize"},
     "parameters": {
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
         "hidden_channels": {"values": [64, 128, 256, 512]},
         "num_layers": {"values": [1, 2, 3, 4]},
         "batch_size": {"values": [1]},
         "weight_decay": {"distribution": "uniform", "min": 1e-6, "max": 1e-1},
-        "delta": {"distribution": "uniform", "min": 0.5, "max": 1.0},
         "gnn_type": {"values": ["GCN", "SAGE", "GAT", "GIN", "EdgeCNN"]},
         "in_channels": {"values": [2089]},
         "out_channels": {"values": [3]},
@@ -53,9 +49,8 @@ sweep_squirrel = {
 }
 
 sweep_chameleon = {
-    "name": "chameleon",
     "method": "bayes",
-    "metric": {"name": "test_auroc", "goal": "maximize"},
+    "metric": {"name": "val_f1", "goal": "maximize"},
     "parameters": {
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
         "hidden_channels": {"values": [64, 128, 256, 512]},
@@ -70,8 +65,27 @@ sweep_chameleon = {
     }
 }
 
-sweep_snap_patents = {
-    "name": "snap_patents",
+sweep_snap_patents_msp = {
+    "method": "bayes",
+    "metric": {
+        "name": "val_f1", 
+        "goal": "maximize"
+    },
+    "parameters": {
+        "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
+        "hidden_channels": {"values": [64, 128, 256]},
+        "num_layers": {"values": [1, 2, 3]},
+        "batch_size": {"values": [-1]},
+        "num_neighbors": {"values": [-1]},
+        "weight_decay": {"distribution": "uniform", "min": 1e-6, "max": 1e-1},
+        "gnn_type": {"values": ["GCN", "SAGE"]},
+        "in_channels": {"values": [269]},
+        "out_channels": {"values": [3]},
+        "patience": {"values": [10]},
+    },
+}
+
+sweep_snap_patents_credal = {
     "method": "bayes",
     "metric": {
         "name": "test_auroc", 
@@ -90,9 +104,4 @@ sweep_snap_patents = {
         "out_channels": {"values": [3]},
         "patience": {"values": [10]},
     },
-    "early_terminate": {
-        "type": "hyperband",
-        "min_iter": 5,
-        "eta": 3
-    }
 }

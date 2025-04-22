@@ -8,16 +8,16 @@ from dataset_loader.loader_snap_patents_year import loader_snap_patents
 DATASET_STORAGE_PATH = "./dataset/"
 
 
-def dataset_loader(dataset_name: str, config):
+def dataset_loader(dataset_name: str, config, split_test=False):
     if dataset_name == 'cora':
-        return loader_cora(DATASET_STORAGE_PATH, config)
+        return loader_cora(DATASET_STORAGE_PATH, config, split_test)
     elif dataset_name == 'ogb_arxiv_year': # TODO fix the seed for the splits
-        return load_ogb_arxiv_year(DATASET_STORAGE_PATH, config)
+        return load_ogb_arxiv_year(DATASET_STORAGE_PATH, config, split_test)
     elif dataset_name == 'squirrel':
-        return laoder_squirrel(DATASET_STORAGE_PATH, config)
+        return laoder_squirrel(DATASET_STORAGE_PATH, config, split_test)
     elif dataset_name == 'chameleon':
-        return laoder_chameleon(DATASET_STORAGE_PATH, config)
+        return laoder_chameleon(DATASET_STORAGE_PATH, config, split_test)
     elif dataset_name == 'snap_patents':
-        return loader_snap_patents(DATASET_STORAGE_PATH, config)
+        return loader_snap_patents(DATASET_STORAGE_PATH, config, split_test)
     else:
         raise ValueError(f"Dataset {dataset_name} not supported")

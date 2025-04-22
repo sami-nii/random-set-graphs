@@ -120,20 +120,22 @@ class UncertaintyGNN(L.LightningModule):
 
         TU, AU, EU = compute_uncertainties(q_L, q_U) 
 
-        print(f"AU: {AU.mean()}, TU: {TU.mean()}, EU: {EU.mean()}")
+        # print(f"AU: {AU.mean()}, TU: {TU.mean()}, EU: {EU.mean()}")
+
+        targets = torch.from_numpy(1 - batch.y.sum(axis=1))
 
 
         auroc = AUROC(task="binary")
 
-
-        auroc_score_EU = auroc(torch.from_numpy(EU), torch.from_numpy(1 - batch.y.sum(axis=1)))
-        auroc_score_AU = auroc(torch.from_numpy(AU), torch.from_numpy(1 - batch.y.sum(axis=1)))
-        auroc_score_TU = auroc(torch.from_numpy(TU), torch.from_numpy(1 - batch.y.sum(axis=1)))
+        # compute AUROC with uncertainty scores
+        auroc_score_EU = auroc(torch.from_numpy(EU), targets)
+        auroc_score_AU = auroc(torch.from_numpy(AU), targets)
+        auroc_score_TU = auroc(torch.from_numpy(TU), targets)
 
         fpr_95 = fpr_at_95_tpr(-EU, batch.y.sum(axis=1))
         
         # Logging
-        self.log("test_auroc", auroc_score_EU) # the "standard" auroc is the one computed with epistemic uncertainty
+        self.log("test_auroc_EU", auroc_score_EU) # the "standard" auroc is the one computed with epistemic uncertainty
         self.log("test_auroc_AU", auroc_score_AU)
         self.log("test_auroc_TU", auroc_score_TU)
         self.log("test_fpr_95", fpr_95)
