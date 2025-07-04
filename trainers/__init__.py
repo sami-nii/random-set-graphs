@@ -3,6 +3,7 @@ import importlib
 
 from .vanilla_trainer import vanilla_train
 from .odin_tester import odin_test
+from .credal_trainer import credal_train
 
 
 # -- Do it automatically --

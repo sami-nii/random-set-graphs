@@ -2,15 +2,15 @@ import wandb
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import EarlyStopping
-from models.VanillaGNN import VanillaGNN
 import os
 import sys
+from models.credal_GNN_t import credal_GNN_t
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from dataset_loader.dataset_loader import dataset_loader
 
 
 
-def vanilla_train(project_name, dataset_name):
+def credal_train(project_name, dataset_name, **kwargs):
     
     # Initialize wandb at the start of the experiment
     wandb.init(project=project_name)
@@ -20,7 +20,7 @@ def vanilla_train(project_name, dataset_name):
     wandb_logger = WandbLogger(project=project_name)
 
     # Instantiate the model
-    model = CredalGNN(
+    model = credal_GNN_t(
         gnn_type=config["gnn_type"],
         in_channels=config["in_channels"],
         out_channels=config["out_channels"],

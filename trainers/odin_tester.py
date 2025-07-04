@@ -17,7 +17,7 @@ def odin_test(project_name, dataset_name, backbone_ckpt_path):
         noise_magnitude=config.noise_magnitude
     )
 
-    # Load the dataset
+    # Load the dataset # TODO test this
     _, _, OOD_train_loader, OOD_test_loader = dataset_loader(dataset_name, config, split_test=True)
 
     trainer = Trainer(

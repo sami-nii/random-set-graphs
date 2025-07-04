@@ -20,43 +20,55 @@ class ODINDetector(L.LightningModule):
 
         # Metrics
         self.auroc = AUROC(task="binary")
-        self.accuracy = Accuracy(task="multiclass", num_classes=self.backbone.C)
-        self.f1 = F1Score(task="multiclass", num_classes=self.backbone.C)
 
         # Save hyperparameters (wandb sweep will control these)
         self.save_hyperparameters(ignore=['backbone'])
 
-    def train_step(self, batch, batch_idx):
+    def forward(self, data): # TODO check
+        # Clone input and enable gradients on x
+        x_perturbed = data.x.clone().detach().requires_grad_(True)
+        data_perturbed = data.clone()
+        data_perturbed.x = x_perturbed
 
-        # Extract logits from backbone
-        logits = self.backbone(batch)
+        # Get logits from the backbone
+        logits = self.backbone(data_perturbed)  # shape: [num_nodes, C]
 
-        # ODIN logic (example implementation)
-        scaled_logits = logits / self.temperature
-        pred_probs = F.softmax(scaled_logits, dim=1)
+        # Apply temperature scaling
+        logits_temp = logits / self.temperature
+        probs = F.softmax(logits_temp, dim=1)
 
-        # Compute OOD scores based on maximum softmax probability
-        max_softmax_scores, pred_classes = pred_probs.max(dim=1)
+        # Get max probability (for loss-like target)
+        max_score, _ = torch.max(probs, dim=1) 
 
-        # OOD thresholding (example, based on hyperparameter)
-        ood_mask = max_softmax_scores < self.noise_magnitude
+        # Create fake "loss" to backprop the max confidence
+        # We want to perturb x in the direction that increases softmax confidence
+        # So we sum over the max score to simulate maximizing it
+        score_sum = torch.sum(max_score)
+        score_sum.backward()
 
-        # Ground-truth OOD labels (assuming your batch.y is one-hot, where all zeros = OOD)
-        target_ood = torch.sum(batch.y, dim=1).bool()
+        # Compute the perturbation: sign of gradient * noise magnitude
+        gradient = x_perturbed.grad.data
+        perturbation = self.noise_magnitude * gradient.sign()
 
-        # Compute metrics
-        auroc_score = self.auroc(max_softmax_scores, target_ood)
-        accuracy_score = self.accuracy(pred_classes[~ood_mask], torch.argmax(batch.y[~ood_mask], dim=1))
-        f1_score = self.f1(pred_classes[~ood_mask], torch.argmax(batch.y[~ood_mask], dim=1))
+        # Add perturbation to x
+        x_final = data.x + perturbation
+        data_perturbed.x = x_final.detach()  # no gradient needed now
 
-        batch_size = batch.y.size(0)
+        # Final forward with perturbed x
+        final_logits = self.backbone(data_perturbed)
+        final_logits_temp = final_logits / self.temperature
+        final_probs = F.softmax(final_logits_temp, dim=1)
 
-        # Logging
-        self.log("test_auroc", auroc_score, batch_size=batch_size)
-        self.log("test_accuracy", accuracy_score, batch_size=batch_size)
-        self.log("test_f1", f1_score, batch_size=batch_size)
+        # Return max softmax scores as OOD confidence
+        ood_scores = torch.max(final_probs, dim=1).values  # higher = more in-distribution
 
-        return auroc_score
+        return ood_scores
+
+
+
+    def train_step(self, batch, batch_idx): # TODO write correctly
+        pass
+        
     
     def test_step(self, batch, batch_idx):
         pass

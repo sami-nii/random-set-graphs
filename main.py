@@ -16,7 +16,7 @@ parser.add_argument(
     "-d", 
     "--dataset",
     type=str,
-    choices=["cora", "ogb_arxiv_year", "squirrel", "chameleon", "snap_patents"],
+    choices=["chameleon", "patents", "arxiv", "reddit2", "coauthor"],
     default="squirrel",
     help="Dataset to run the sweep on.",
 )
@@ -33,7 +33,7 @@ parser.add_argument(
     "-m",
     "--model",
     type=str,
-    choices=["vanilla"],
+    choices=["vanilla", "credal"],
     default="vanilla",
     help="Model to run the sweep on.",
 )
@@ -70,14 +70,19 @@ if args.model == "vanilla":
     train_func = trainers.vanilla_train
 elif args.model == "odin":
     train_func = trainers.odin_test
+elif args.model == "credal":
+    train_func = trainers.credal_train
 else:
     raise ValueError(f"Unsupported model: {args.model}")
 
 
-if not args.model == "vanilla":
+save_path = None
+
+if  args.model == "odin": # odin is post-hoc, so it needs a pre-trained model (vanilla)
     # the save path should be the best model for the selected dataset
     save_path = search_best_model(args.save_path, args.dataset)
-else:
+
+if args.model == "vanilla": # save the pre-trained model
     # the save path should be the folder where the models will be saved
     os.makedirs(args.save_path, exist_ok=True)
     save_path = args.save_path
@@ -99,7 +104,8 @@ train_func = partial(
     save_path=save_path
 )
 
-wandb.agent(sweep_id, function=train_func)
+print(f"Running sweep with ID: {sweep_id}")
+wandb.agent(sweep_id, function=train_func, project=args.project_name)
 
     
     
