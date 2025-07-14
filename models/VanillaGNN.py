@@ -6,16 +6,12 @@ import torch.nn.functional as F
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from utils.math import cross_entropy_loss
+# Assuming these are available and work as before
+from ood_metrics import fpr_at_95_tpr
 from torchmetrics import Accuracy, F1Score, AUROC 
 
-
 models_map = {
-    "GCN": GCN,  # GCN is built-in in torch_geometric
-    "SAGE": GraphSAGE,  # SAGE is built-in in torch_geometric
-    "GAT": GAT,  # GAT is built-in in torch_geometric
-    "GIN": GIN,  # GIN is built-in in torch_geometric
-    "EdgeCNN": EdgeCNN,  # EdgeCNN is built-in in torch_geometric
+    "GCN": GCN, "SAGE": GraphSAGE, "GAT": GAT, "GIN": GIN, "EdgeCNN": EdgeCNN
 }
 
 class VanillaGNN(L.LightningModule):
@@ -28,110 +24,129 @@ class VanillaGNN(L.LightningModule):
         out_channels: int,
         lr: float = 0.001,
         weight_decay: float = 0.0,
+        ood_in_val: bool = True, # Flag to control validation behavior
         **kwargs,
     ) -> None:
         super().__init__()
+        self.save_hyperparameters()
         
-        # Dynamically initialize the GNN model
+        # GNN outputs raw logits for the number of ID classes
         self.gnn_model = models_map[gnn_type](
             in_channels=in_channels,
             hidden_channels=hidden_channels,
             num_layers=num_layers,
-            out_channels=out_channels,
-            act=F.sigmoid,
+            out_channels=out_channels, # This is the number of ID classes
+            act=F.sigmoid, 
             **kwargs,
         )
-
         self.C = out_channels
 
-        # Cross-Entropy Loss for multi-class classification
-        self.criterion = cross_entropy_loss
+        # Use PyTorch's built-in CrossEntropyLoss for stability
+        self.criterion = nn.CrossEntropyLoss()
 
-        self.accuracy = Accuracy(task="multiclass", num_classes=out_channels)
-        self.f1 = F1Score(task="multiclass", num_classes=out_channels)
+        # Initialize metrics
+        self.accuracy_metric = Accuracy(task="multiclass", num_classes=out_channels)
+        self.f1_metric = F1Score(task="multiclass", num_classes=out_channels)
+        self.auroc_metric = AUROC(task="binary")
         
-        # Learning parameters
         self.lr = lr
         self.weight_decay = weight_decay
-
-        # Save hyperparameters
-        self.save_hyperparameters()
+        self.ood_in_val = ood_in_val
 
         self.apply(self.weights_init)
 
     def forward(self, data):
-        # Forward method to process node features and edges
-        out =  F.softmax(self.gnn_model(data.x, data.edge_index)) # shape (num_nodes * hidden_dim)
+        # The model should return raw logits
+        logits = self.gnn_model(data.x, data.edge_index)
+        return logits
 
-        assert len(out.shape) == 2, f"Representation layer must be 2D tensor, but got shape {out.shape}"
-        assert out.shape[1] == self.gnn_model.out_channels, f"Representation layer must have {self.gnn_model.out_channels} channels, but got {out.shape[1]} channels"
-
-        return out 
-
-        
     def training_step(self, batch, batch_idx):
+        logits = self(batch)
         
-        out = self(batch)  # shape: [num_nodes, C]
-
-        loss = self.criterion(out, batch.y).mean()
-
-        pred = torch.argmax(out, dim=1)
-        target = torch.argmax(batch.y, dim=1)
-
-        accuracy = self.accuracy(pred, target)
-        f1 = self.f1(pred, target)
-
-        batch_size = batch.y.shape[0]
+        # Apply train mask to get logits and labels for training nodes
+        logits_train = logits[batch.train_mask]
+        y_train = batch.y[batch.train_mask]
         
-        # Logging
-        self.log("train_loss", loss, batch_size=batch_size)
-        self.log("train_acc", accuracy, batch_size=batch_size)
-        self.log("train_f1", f1, batch_size=batch_size)
-
+        # The loss function expects class indices, not one-hot vectors
+        loss = self.criterion(logits_train, torch.argmax(y_train, dim=1))
+        
+        # Calculate metrics
+        preds = torch.argmax(logits_train, dim=1)
+        target = torch.argmax(y_train, dim=1)
+        accuracy = self.accuracy_metric(preds, target)
+        f1 = self.f1_metric(preds, target)
+        
+        num_train_nodes = batch.train_mask.sum()
+        self.log("train_loss", loss, batch_size=num_train_nodes)
+        self.log("train_acc", accuracy, batch_size=num_train_nodes)
+        self.log("train_f1", f1, batch_size=num_train_nodes)
         return loss
 
     def validation_step(self, batch, batch_idx):
+        logits = self(batch)
         
-        out = self(batch)  # shape: [num_nodes, C]
+        # Get all predictions and labels for the validation set
+        logits_val = logits[batch.val_mask].detach()
+        y_val = batch.y[batch.val_mask].detach()
 
-        loss = self.criterion(out, batch.y).mean()
+        # OOD Detection using Maximum Softmax Probability (MSP)
+        if self.ood_in_val:
+            probs = F.softmax(logits_val, dim=1)
+            msp_scores, _ = torch.max(probs, dim=1)
+            ood_scores = -msp_scores # Lower confidence -> higher score
+            
+            ood_targets = 1 - y_val.sum(axis=1)
+            val_auroc = self.auroc_metric(ood_scores, ood_targets)
+            self.log("val_auroc", val_auroc, prog_bar=True)
 
-        pred = torch.argmax(out, dim=1)
-        target = torch.argmax(batch.y, dim=1)
-
-        accuracy = self.accuracy(pred, target)
-        f1 = self.f1(pred, target)
-
-        batch_size = batch.y.shape[0]
+        # Classification Metrics on ID nodes within the validation set
+        id_mask_in_val = (y_val.sum(axis=1) == 1)
         
-        # Logging
-        self.log("val_loss", loss, batch_size=batch_size)
-        self.log("val_acc", accuracy, batch_size=batch_size)
-        self.log("val_f1", f1, batch_size=batch_size)
-
+        id_logits = logits_val[id_mask_in_val]
+        id_labels = torch.argmax(y_val[id_mask_in_val], dim=1)
+        
+        loss = self.criterion(id_logits, id_labels)
+        self.log("val_loss", loss, prog_bar=True)
+        
+        id_preds = torch.argmax(id_logits, dim=1)
+        val_acc = self.accuracy_metric(id_preds, id_labels)
+        val_f1 = self.f1_metric(id_preds, id_labels)
+        
+        self.log("val_acc", val_acc)
+        self.log("val_f1", val_f1, prog_bar=True)
         return loss
     
     def test_step(self, batch, batch_idx):
+        logits = self(batch)
+
+        logits_test = logits[batch.test_mask].detach()
+        y_test = batch.y[batch.test_mask].detach()
+
+        # OOD Detection using MSP
+        probs = F.softmax(logits_test, dim=1)
+        msp_scores, _ = torch.max(probs, dim=1)
+        ood_scores = -msp_scores
+
+        ood_targets = 1 - y_test.sum(axis=1)
+        test_auroc = self.auroc_metric(ood_scores, ood_targets)
+        test_fpr95 = fpr_at_95_tpr(ood_scores, ood_targets)
+
+        self.log("test_auroc", test_auroc)
+        self.log("test_fpr95", test_fpr95)
+
+        # Classification Metrics on ID nodes
+        id_mask_in_test = (y_test.sum(axis=1) == 1)
         
-        out = self(batch)  # shape: [num_nodes, C]
-
-        loss = self.criterion(out, batch.y).mean()
-
-        pred = torch.argmax(out, dim=1)
-        target = torch.argmax(batch.y, dim=1)
-
-        accuracy = self.accuracy(pred, target)
-        f1 = self.f1(pred, target)
-
-        batch_size = batch.y.shape[0]
+        id_logits = logits_test[id_mask_in_test]
+        id_labels = torch.argmax(y_test[id_mask_in_test], dim=1)
         
-        # Logging
-        self.log("test_loss", loss, batch_size=batch_size)
-        self.log("test_acc", accuracy, batch_size=batch_size)
-        self.log("test_f1", f1, batch_size=batch_size)
-
-        return loss
-    
+        id_preds = torch.argmax(id_logits, dim=1)
+        test_acc = self.accuracy_metric(id_preds, id_labels)
+        test_f1 = self.f1_metric(id_preds, id_labels)
+        
+        self.log("test_acc", test_acc)
+        self.log("test_f1", test_f1)
+        return test_auroc
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
@@ -142,5 +157,5 @@ class VanillaGNN(L.LightningModule):
     def weights_init(self, m):
         if isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight)
-            nn.init.zeros_(m.bias)
-
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)

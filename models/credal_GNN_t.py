@@ -29,6 +29,7 @@ class credal_GNN_t(L.LightningModule):
         lr: float = 0.001,
         weight_decay: float = 0.0,
         delta = 0.5,
+        ood_in_val: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -44,9 +45,11 @@ class credal_GNN_t(L.LightningModule):
         self.criterion = CreNetLoss(delta=delta)
         self.lr = lr
         self.weight_decay = weight_decay
+        self.ood_in_val = ood_in_val
         
         self.f1_score_metric = F1Score(task="multiclass", num_classes=self.C)
-
+        self.auroc_metric = AUROC(task="binary")
+        
         self.apply(self.weights_init)
 
     def forward(self, data):
@@ -70,7 +73,6 @@ class credal_GNN_t(L.LightningModule):
         accuracy_U = (train_preds_U == train_labels).float().mean()
         accuracy_L = (train_preds_L == train_labels).float().mean()
         
-        ### MODIFIED ###
         f1_U = self.f1_score_metric(train_preds_U, train_labels)
         f1_L = self.f1_score_metric(train_preds_L, train_labels)
         
@@ -83,31 +85,47 @@ class credal_GNN_t(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        ### REVISED VALIDATION STEP ###
         q_L, q_U = self(batch)
 
-        y_val = batch.y[batch.val_mask]
-        q_U_val = q_U[batch.val_mask]
-        q_L_val = q_L[batch.val_mask]
-
-        loss = self.criterion(q_L_val, q_U_val, y_val)
+        # Select the outputs and labels for the validation nodes
+        q_L_val = q_L[batch.val_mask].detach()
+        q_U_val = q_U[batch.val_mask].detach()
+        y_val = batch.y[batch.val_mask].detach()
         
-        val_preds_U = torch.argmax(q_U_val, dim=1)
-        val_preds_L = torch.argmax(q_L_val, dim=1)
-        val_labels = torch.argmax(y_val, dim=1)
+        # --- OOD Detection Metrics ---
+        if self.ood_in_val:
+            TU, AU, EU = compute_uncertainties(q_L_val.cpu().numpy(), q_U_val.cpu().numpy()) 
+            targets = 1 - y_val.sum(axis=1) # 1 for OOD, 0 for ID
+            
+            auroc_EU = self.auroc_metric(torch.from_numpy(EU).to(self.device), targets)
+            auroc_AU = self.auroc_metric(torch.from_numpy(AU).to(self.device), targets)
+            auroc_TU = self.auroc_metric(torch.from_numpy(TU).to(self.device), targets)
+            
+            self.log("val_auroc_EU", auroc_EU, prog_bar=True) # Monitor this during training
+            self.log("val_auroc_AU", auroc_AU)
+            self.log("val_auroc_TU", auroc_TU)
+        
+        # --- Classification Metrics (for ID nodes within the validation set) ---
+        id_mask_in_val = (y_val.sum(axis=1) == 1)
+        
+        # Calculate validation loss ONLY on ID nodes
+        loss = self.criterion(q_L_val[id_mask_in_val], q_U_val[id_mask_in_val], y_val[id_mask_in_val])
+        self.log("val_loss", loss, prog_bar=True)
 
-        accuracy_U = (val_preds_U == val_labels).float().mean()
-        accuracy_L = (val_preds_L == val_labels).float().mean()
+        # Calculate classification metrics
+        val_labels = torch.argmax(y_val[id_mask_in_val], dim=1)
+        
+        val_preds_U = torch.argmax(q_U_val[id_mask_in_val], dim=1)
+        val_preds_L = torch.argmax(q_L_val[id_mask_in_val], dim=1)
 
-        ### MODIFIED ###
-        f1_U = self.f1_score_metric(val_preds_U, val_labels)
-        f1_L = self.f1_score_metric(val_preds_L, val_labels)
+        val_f1_U = self.f1_score_metric(val_preds_U, val_labels)
+        val_f1_L = self.f1_score_metric(val_preds_L, val_labels)
+        
+        self.log("val_f1_U", val_f1_U, prog_bar=True)
+        self.log("val_f1_L", val_f1_L)
 
-        num_val_nodes = batch.val_mask.sum()
-        self.log("val_loss", loss, batch_size=num_val_nodes, prog_bar=True)
-        self.log("val_acc_U", accuracy_U, batch_size=num_val_nodes)
-        self.log("val_acc_L", accuracy_L, batch_size=num_val_nodes)
-        self.log("val_f1_U", f1_U, batch_size=num_val_nodes, prog_bar=True)
-        self.log("val_f1_L", f1_L, batch_size=num_val_nodes)
+
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -130,23 +148,21 @@ class credal_GNN_t(L.LightningModule):
         # Classification Metrics (for ID nodes only)
         id_mask_in_test = (y_test.sum(axis=1) == 1)
         
-        if id_mask_in_test.sum() > 0:
-            id_labels = torch.argmax(y_test[id_mask_in_test], dim=1)
-            
-            ### MODIFIED ###
-            id_preds_U = torch.argmax(q_U_test[id_mask_in_test], dim=1)
-            id_preds_L = torch.argmax(q_L_test[id_mask_in_test], dim=1)
-            
-            id_accuracy_U = (id_preds_U == id_labels).float().mean()
-            id_accuracy_L = (id_preds_L == id_labels).float().mean()
-            
-            id_f1_U = self.f1_score_metric(id_preds_U, id_labels)
-            id_f1_L = self.f1_score_metric(id_preds_L, id_labels)
-            
-            self.log("test_id_accuracy_U", id_accuracy_U)
-            self.log("test_id_accuracy_L", id_accuracy_L)
-            self.log("test_id_f1_U", id_f1_U)
-            self.log("test_id_f1_L", id_f1_L)
+        id_labels = torch.argmax(y_test[id_mask_in_test], dim=1)
+        
+        id_preds_U = torch.argmax(q_U_test[id_mask_in_test], dim=1)
+        id_preds_L = torch.argmax(q_L_test[id_mask_in_test], dim=1)
+        
+        id_accuracy_U = (id_preds_U == id_labels).float().mean()
+        id_accuracy_L = (id_preds_L == id_labels).float().mean()
+        
+        id_f1_U = self.f1_score_metric(id_preds_U, id_labels)
+        id_f1_L = self.f1_score_metric(id_preds_L, id_labels)
+        
+        self.log("test_accuracy_U", id_accuracy_U)
+        self.log("test_accuracy_L", id_accuracy_L)
+        self.log("test_f1_U", id_f1_U)
+        self.log("test_f1_L", id_f1_L)
         
         return auroc_EU
 

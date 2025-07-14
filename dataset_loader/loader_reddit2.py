@@ -149,48 +149,62 @@ def one_hot_encode(labels, num_classes):
 
 def load_reddit2(DATASET_STORAGE_PATH, config):
     """
-    Loads the Reddit2 dataset and prepares it for transductive OOD detection.
+    Loads the Reddit2 dataset and prepares it for transductive OOD detection,
+    now including OOD samples in the validation set for hyperparameter tuning.
+
+    Args:
+        DATASET_STORAGE_PATH (str): Path to store the dataset.
+        config (dict): A configuration dictionary.
+
+    Returns:
+        A tuple of (train_loader, val_loader, test_loader).
     """
     # --- 1. Load the Full Graph Data ---
     dataset = Reddit2(root=osp.join(DATASET_STORAGE_PATH, 'reddit2'))
     data = dataset[0]
 
-    # --- 2. Prepare Masks based on CORRECTED ID/OOD classes ---
-    # As per your request:
-    OODclass = list(range(11))         # Classes 0 to 10 are OOD
-    IDclass = list(range(11, 41))      # Classes 11 to 40 are ID
+    # --- 2. Define Class and Node Splits ---
+    OODclass = list(range(11))
+    IDclass = list(range(11, 41))
     num_id_classes = len(IDclass)
-    
-    print("--- Reddit2 Dataset Corrected Split ---")
-    print(f"OOD Classes: {OODclass[0]}...{OODclass[-1]}")
-    print(f"ID Classes: {IDclass[0]}...{IDclass[-1]}")
     
     original_train_mask = data.train_mask
     original_val_mask = data.val_mask
     original_test_mask = data.test_mask
 
     ood_node_mask = torch.isin(data.y, torch.tensor(OODclass))
-
-    data.train_mask = original_train_mask & ~ood_node_mask
-    data.val_mask = original_val_mask & ~ood_node_mask
-    data.test_mask = original_test_mask
-
-    print(f"Nodes for training (ID only): {data.train_mask.sum().item()}")
-    print(f"Nodes for validation (ID only): {data.val_mask.sum().item()}")
-    print(f"Nodes for testing (ID + OOD): {data.test_mask.sum().item()}")
-
-    # --- 3. Prepare the Unified Label Tensor (y) ---
-    new_y = torch.zeros((data.num_nodes, num_id_classes), dtype=torch.float)
     id_node_mask = ~ood_node_mask
+
+    # --- 3. Create OOD-Aware Validation and Test Masks ---
+
+    # ID nodes for each set are taken from the original splits
+    id_train_nodes = original_train_mask & id_node_mask
+    id_val_nodes = original_val_mask & id_node_mask
+    id_test_nodes = original_test_mask & id_node_mask
+
+    # OOD nodes for each set are also taken from the original splits
+    ood_train_nodes = original_train_mask & ood_node_mask
+    ood_val_nodes = original_val_mask & ood_node_mask
+    ood_test_nodes = original_test_mask & ood_node_mask
     
+    # The final masks are attached to the data object
+    data.train_mask = id_train_nodes
+    data.val_mask = id_val_nodes | ood_val_nodes   # Validation includes ID and OOD nodes
+    data.test_mask = id_test_nodes | ood_test_nodes   # Test set remains the final hold-out
+
+    print("--- Reddit2 Dataset with OOD Validation ---")
+    print(f"Nodes for training (ID only): {data.train_mask.sum().item()}")
+    print(f"Nodes for validation (ID+OOD): {data.val_mask.sum().item()} -> {id_val_nodes.sum()} ID, {ood_val_nodes.sum()} OOD")
+    print(f"Nodes for testing (ID+OOD): {data.test_mask.sum().item()} -> {id_test_nodes.sum()} ID, {ood_test_nodes.sum()} OOD")
+
+    # --- 4. Prepare the Unified Label Tensor (y) ---
+    new_y = torch.zeros((data.num_nodes, num_id_classes), dtype=torch.float)
     original_id_labels = data.y[id_node_mask]
-    # This correctly remaps labels [11, ..., 40] to [0, ..., 29]
     remapped_id_labels = original_id_labels - min(IDclass)
-    
     new_y[id_node_mask] = one_hot_encode(remapped_id_labels, num_id_classes)
     data.y = new_y
     
-    # --- 4. Create DataLoaders ---
+    # --- 5. Create DataLoaders ---
     train_loader = DataLoader([data], batch_size=1, shuffle=False)
     val_loader = DataLoader([data], batch_size=1, shuffle=False)
     test_loader = DataLoader([data], batch_size=1, shuffle=False)

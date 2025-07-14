@@ -11,6 +11,8 @@ DATASET_STORAGE_PATH = "./dataset/"
 
 
 def dataset_loader(dataset_name: str, config, split_test=False):
+    print(f"correct all the other loaders (only reddit2 is correct)")
+    return None
     if dataset_name == 'cora':
         return loader_cora(DATASET_STORAGE_PATH, config, split_test)
     elif dataset_name == 'arxiv': # TODO fix the seed for the splits
