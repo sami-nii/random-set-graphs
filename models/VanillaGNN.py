@@ -6,8 +6,6 @@ import torch.nn.functional as F
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-# Assuming these are available and work as before
-from ood_metrics import fpr_at_95_tpr
 from torchmetrics import Accuracy, F1Score, AUROC 
 
 models_map = {
@@ -129,10 +127,8 @@ class VanillaGNN(L.LightningModule):
 
         ood_targets = 1 - y_test.sum(axis=1)
         test_auroc = self.auroc_metric(ood_scores, ood_targets)
-        test_fpr95 = fpr_at_95_tpr(ood_scores, ood_targets)
 
         self.log("test_auroc", test_auroc)
-        self.log("test_fpr95", test_fpr95)
 
         # Classification Metrics on ID nodes
         id_mask_in_test = (y_test.sum(axis=1) == 1)

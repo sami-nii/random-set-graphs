@@ -8,7 +8,7 @@ import sys
 import numpy as np
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.math import compute_uncertainties
-from ood_metrics import fpr_at_95_tpr
+# from ood_metrics import fpr_at_95_tpr
 from torchmetrics import AUROC
 from torchmetrics.classification import F1Score
 from models.credal_layer import CredalLayer
@@ -143,7 +143,7 @@ class credal_GNN_t(L.LightningModule):
         self.log("test_auroc_EU", auroc_EU)
         self.log("test_auroc_AU", auroc_calculator(torch.from_numpy(AU), targets))
         self.log("test_auroc_TU", auroc_calculator(torch.from_numpy(TU), targets))
-        self.log("test_fpr_95", fpr_at_95_tpr(torch.from_numpy(EU), targets))
+        # self.log("test_fpr_95", fpr_at_95_tpr(torch.from_numpy(EU), targets))
 
         # Classification Metrics (for ID nodes only)
         id_mask_in_test = (y_test.sum(axis=1) == 1)

@@ -6,86 +6,72 @@ from torch_geometric.datasets import WikipediaNetwork
 from torch_geometric.data import Data
 
 
-def laoder_squirrel(DATASET_STORAGE_PATH, config, split_test):
-    dataset = WikipediaNetwork(root=DATASET_STORAGE_PATH, name='squirrel')
-    dataset = dataset[0]  # there is only one graph in the dataset
+def loader_squirrel(DATASET_STORAGE_PATH, config, split_index=0):
+    """
+    Loads the Squirrel dataset and prepares it for transductive OOD detection
+    using the correct MASKING approach, including OOD samples in the validation set.
 
-    # Define OOD and ID classes
+    Args:
+        DATASET_STORAGE_PATH (str): Path to store the WikipediaNetwork dataset.
+        config (dict): A configuration dictionary (batch_size is ignored).
+        split_index (int): The dataset provides 10 different train/val/test splits.
+                           This selects which one to use. Defaults to 0.
+
+    Returns:
+        A tuple of (train_loader, val_loader, test_loader).
+    """
+    # --- 1. Load the Full Graph Data ---
+    dataset = WikipediaNetwork(root=DATASET_STORAGE_PATH, name='squirrel')
+    data = dataset[0]  # Get the single graph object
+
+    # --- 2. Prepare Masks based on specified ID/OOD classes ---
     OODclass = [0, 1]
     IDclass = [2, 3, 4]
+    num_id_classes = len(IDclass)
     
-    train_mask = dataset.train_mask[:, 0].clone()
-    val_mask = dataset.val_mask[:, 0].clone()
-    test_mask = dataset.test_mask[:, 0].clone()
+    # The dataset has 10 splits, we select one using the split_index
+    original_train_mask = data.train_mask[:, split_index]
+    original_val_mask = data.val_mask[:, split_index]
+    original_test_mask = data.test_mask[:, split_index]
 
-    # Mask for OOD nodes
-    ood_mask = torch.isin(dataset.y, torch.tensor(OODclass))
+    # Create masks for the entire node population
+    ood_node_mask = torch.isin(data.y, torch.tensor(OODclass))
+    id_node_mask = ~ood_node_mask
 
-    # Update masks to filter out OOD nodes for training and validation
-    train_mask = train_mask & ~ood_mask
-    val_mask = val_mask & ~ood_mask
+    # --- 3. Create the Final Masks for the Data Object ---
 
-    # Create subgraphs based on filtered masks
-    train_data = dataset.subgraph(train_mask)
-    val_data = dataset.subgraph(val_mask)
-    test_data = dataset.subgraph(test_mask)
-
-    # One-hot encode labels for training and validation data (only ID classes)
-    train_data.y = one_hot_encode(train_data.y - min(IDclass), len(IDclass))
-    val_data.y = one_hot_encode(val_data.y - min(IDclass), len(IDclass))
-
-    # Encode labels for test data: one-hot for ID classes, all zero for OOD classes
+    # The final train mask must ONLY include ID-class nodes
+    data.train_mask = original_train_mask & id_node_mask
     
-    is_ood_test = torch.isin(test_data.y, torch.tensor(OODclass))
+    # The validation mask should include ALL nodes (ID and OOD) from its original split
+    data.val_mask = original_val_mask
+    
+    # The test mask should also include ALL nodes from its original split
+    data.test_mask = original_test_mask
 
-    # Initialize test labels to zeros
-    test_labels_encoded = torch.zeros((test_data.y.size(0), len(IDclass)))
+    # --- Reporting for verification ---
+    print("--- Squirrel Dataset with OOD Validation ---")
+    id_val_nodes = data.val_mask & id_node_mask
+    ood_val_nodes = data.val_mask & ood_node_mask
+    id_test_nodes = data.test_mask & id_node_mask
+    ood_test_nodes = data.test_mask & ood_node_mask
+    
+    print(f"Nodes for training (ID only): {data.train_mask.sum().item()}")
+    print(f"Nodes for validation (ID+OOD): {data.val_mask.sum().item()} -> {id_val_nodes.sum()} ID, {ood_val_nodes.sum()} OOD")
+    print(f"Nodes for testing (ID+OOD): {data.test_mask.sum().item()} -> {id_test_nodes.sum()} ID, {ood_test_nodes.sum()} OOD")
 
-    # Encode ID class nodes in test data
-    id_test_indices = (~is_ood_test).nonzero(as_tuple=True)[0]
-    test_labels_encoded[id_test_indices] = one_hot_encode(
-        test_data.y[id_test_indices] - min(IDclass), len(IDclass)
-    )
+    # --- 4. Prepare the Unified Label Tensor (y) ---
+    new_y = torch.zeros((data.num_nodes, num_id_classes), dtype=torch.float)
+    
+    original_id_labels = data.y[id_node_mask]
+    remapped_id_labels = original_id_labels - min(IDclass)
+    
+    new_y[id_node_mask] = one_hot_encode(remapped_id_labels, num_id_classes)
+    data.y = new_y
+    
+    # --- 5. Create DataLoaders ---
+    train_loader = DataLoader([data], batch_size=1, shuffle=False)
+    val_loader = DataLoader([data], batch_size=1, shuffle=False)
+    test_loader = DataLoader([data], batch_size=1, shuffle=False)
 
-    test_data.y = test_labels_encoded
-
-    train_data.validate()
-    val_data.validate()
-    test_data.validate()
-
-    train_loader = DataLoader([train_data], batch_size=config["batch_size"], shuffle=True)
-    val_loader = DataLoader([val_data], batch_size=config["batch_size"], shuffle=False)
-    test_loader = DataLoader([test_data], batch_size=config["batch_size"], shuffle=False)
-
-    if split_test:
-        num_nodes = test_data.num_nodes
-        all_indices = torch.randperm(num_nodes)
-        half = num_nodes // 2
-
-        idx_1 = all_indices[:half]
-        idx_2 = all_indices[half:]
-
-        # Get subgraphs for each half
-        edge_index_1, _ = subgraph(idx_1, test_data.edge_index, relabel_nodes=True)
-        edge_index_2, _ = subgraph(idx_2, test_data.edge_index, relabel_nodes=True)
-
-        data_1 = Data(
-            x=test_data.x[idx_1],
-            edge_index=edge_index_1,
-            y=test_data.y[idx_1]
-        )
-
-        data_2 = Data(
-            x=test_data.x[idx_2],
-            edge_index=edge_index_2,
-            y=test_data.y[idx_2]
-        )
-
-        OOD_train_loader = DataLoader([data_1], batch_size=1, shuffle=False),
-        OOD_test_loader = DataLoader([data_2], batch_size=1, shuffle=False)
-        
-        return train_loader, val_loader, OOD_train_loader, OOD_test_loader
-    else:
-        # Return the loaders for training, validation, and test
-        return train_loader, val_loader, test_loader
-
+    return train_loader, val_loader, test_loader

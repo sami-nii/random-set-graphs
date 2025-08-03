@@ -33,7 +33,7 @@ parser.add_argument(
     "-m",
     "--model",
     type=str,
-    choices=["vanilla", "credal"],
+    choices=["vanilla", "credal", "ensemble"],
     default="vanilla",
     help="Model to run the sweep on.",
 )
@@ -55,6 +55,7 @@ parser.add_argument(
 
 args = parser.parse_args()
 
+# TODO maybe a single sweep for model is needed and not one for each dataset
 try:
     # Dynamically construct the name of the sweep variable
     sweep_var_name = f"sweep_{args.dataset}_{args.model}"
@@ -72,20 +73,10 @@ elif args.model == "odin":
     train_func = trainers.odin_test
 elif args.model == "credal":
     train_func = trainers.credal_train
+elif args.model == "ensemble":
+    train_func = trainers.ensemble_tester
 else:
     raise ValueError(f"Unsupported model: {args.model}")
-
-
-save_path = None
-
-if  args.model == "odin": # odin is post-hoc, so it needs a pre-trained model (vanilla)
-    # the save path should be the best model for the selected dataset
-    save_path = search_best_model(args.save_path, args.dataset)
-
-if args.model == "vanilla": # save the pre-trained model
-    # the save path should be the folder where the models will be saved
-    os.makedirs(args.save_path, exist_ok=True)
-    save_path = args.save_path
 
 
 sweep["name"] = f"{args.dataset}_{args.model}"
@@ -101,7 +92,7 @@ train_func = partial(
     train_func, 
     project_name=args.project_name, 
     dataset_name=args.dataset, 
-    save_path=save_path
+    save_path=args.save_path
 )
 
 print(f"Running sweep with ID: {sweep_id}")
