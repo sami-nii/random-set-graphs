@@ -16,7 +16,7 @@ parser.add_argument(
     "-d", 
     "--dataset",
     type=str,
-    choices=["chameleon", "patents", "arxiv", "reddit2", "coauthor"],
+    choices=["chameleon", "patents", "arxiv", "reddit2", "coauthor", "squirrel"],
     default="squirrel",
     help="Dataset to run the sweep on.",
 )
@@ -33,7 +33,7 @@ parser.add_argument(
     "-m",
     "--model",
     type=str,
-    choices=["vanilla", "credal", "ensemble"],
+    choices=["vanilla", "credal", "ensemble", "credal_LJ"],
     default="vanilla",
     help="Model to run the sweep on.",
 )
@@ -53,18 +53,34 @@ parser.add_argument(
     help="Path to save the model checkpoints.",
 )
 
+parser.add_argument(
+    "-c",
+    "--count",
+    type=int,
+    default=None,
+    help="Number of runs to execute in the sweep.",
+)
+
 args = parser.parse_args()
 
-# TODO maybe a single sweep for model is needed and not one for each dataset
+
 try:
     # Dynamically construct the name of the sweep variable
-    sweep_var_name = f"sweep_{args.dataset}_{args.model}"
+    sweep_model_name = f"sweep_{args.model}"
+    sweep_dataset_name = f"metadata_{args.dataset}"
     # Dynamically import the sweeps module
     sweeps_module = importlib.import_module("sweeps.sweeps")
     # Get the sweep dict by name
-    sweep = getattr(sweeps_module, sweep_var_name)
+    sweep_model = getattr(sweeps_module, sweep_model_name)
+    sweep_dataset = getattr(sweeps_module, sweep_dataset_name)
 except AttributeError:
-    raise ValueError(f"No sweep found for combination: {sweep_var_name}")
+    raise ValueError(f"No sweep found for: {sweep_model_name} and {sweep_dataset_name}")
+
+
+sweep = sweep_model.copy() 
+sweep['parameters'].update(sweep_dataset)
+
+sweep["name"] = f"{args.dataset}_{args.model}"
 
 
 if args.model == "vanilla":
@@ -75,17 +91,10 @@ elif args.model == "credal":
     train_func = trainers.credal_train
 elif args.model == "ensemble":
     train_func = trainers.ensemble_tester
+elif args.model == "credal_LJ":
+    train_func = trainers.credal_LJ_train
 else:
     raise ValueError(f"Unsupported model: {args.model}")
-
-
-sweep["name"] = f"{args.dataset}_{args.model}"
-
-
-if args.sweep:
-    sweep_id = args.sweep
-else:
-    sweep_id = wandb.sweep(sweep=sweep, project=args.project_name)
 
 
 train_func = partial(
@@ -95,8 +104,20 @@ train_func = partial(
     save_path=args.save_path
 )
 
+if args.sweep:
+    sweep_id = args.sweep
+else:
+    sweep_id = wandb.sweep(sweep=sweep, project=args.project_name)
+
+
 print(f"Running sweep with ID: {sweep_id}")
-wandb.agent(sweep_id, function=train_func, project=args.project_name)
+
+wandb.agent(
+    sweep_id=sweep_id, 
+    function=train_func, 
+    project=args.project_name,
+    count=args.count,
+)
 
     
     

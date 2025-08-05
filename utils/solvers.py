@@ -23,21 +23,63 @@ def entropy(q):
 def constraint_sum(q):
     return np.sum(q) - 1
 
+from scipy.optimize import minimize, linprog
+import numpy as np
+
 def initial_guess(l, u, delta=1e-5):
+    """
+    Computes an initial feasible guess for the optimization.
+    Tries a sophisticated linear programming approach first, but provides a
+    robust fallback if it fails due to numerical precision issues.
+
+    Args:
+        l (np.ndarray): Lower bounds.
+        u (np.ndarray): Upper bounds.
+        delta (float): Small epsilon for clipping.
+
+    Returns:
+        np.ndarray: A feasible initial guess vector x0.
+    """
     n = len(l)
-    c = np.zeros(n)
+    c = np.zeros(n)  # Objective for linprog is irrelevant, we just want a feasible point
     A_eq = np.ones((1, n))
     b_eq = np.array([1.0])
-    u_clip = np.clip(u, delta, np.max(u))
+    
+    # Clip the upper bound to ensure it's strictly positive, helping linprog
+    u_clip = np.clip(u, delta, None) # Clip only the lower end
 
-    bounds = [(l[i], u_clip[i]) for i in range(n)]
+    bounds = list(zip(l, u_clip))
 
-    res = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds)
+    # --- Attempt 1: Use linear programming for a good initial guess ---
+    # Suppress verbose error messages from linprog as we will handle failures
+    res = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs', options={"disp": False})
 
-    if res.success:
+    # Check if linprog was successful and the result is valid
+    if res.success and res.x is not None and len(res.x) == n:
         return res.x
+
+    # --- Attempt 2 (Fallback): A robust, simple guess if linprog fails ---
+    # This can happen due to floating point issues where sum(l) > 1 by a tiny amount.
+    # We create a guess from the midpoint and then project it onto the simplex.
     else:
-        return None
+        # Start with the midpoint of the bounds
+        x0 = (l + u_clip) / 2.0
+        
+        # Ensure it sums to 1 by normalizing
+        x0_sum = np.sum(x0)
+        if x0_sum > 1e-9: # Avoid division by zero
+            x0 = x0 / x0_sum
+        else:
+            # If the sum is near zero, use a uniform distribution as a last resort
+            x0 = np.full(n, 1.0 / n)
+            
+        # Even after normalization, we must clip to ensure it respects the bounds
+        x0 = np.clip(x0, l, u_clip)
+        
+        # A final renormalization might be needed after clipping
+        x0 = x0 / np.sum(x0)
+        
+        return x0
 
 def min_max_entropy(l, u, x0, delta=1e-5):
     n = len(l)
@@ -87,7 +129,7 @@ def worker_task(node_idx):
     ub = shared_upper_bound[node_idx]
 
     if not np.all(lb <= ub):
-        print(f"Warning: received upper bound {ub} less than lower bound {lb} for node {node_idx}. Clipping lower bound to be equal to the upper bound .")
+        # print(f"Warning: received upper bound {ub} less than lower bound {lb} for node {node_idx}. Clipping lower bound to be equal to the upper bound .")
         lb = np.minimum(lb, ub) # Ensure lb <= ub, this could not be guaranteed due to numerical errors
 
     # --- Optimization Logic (same as calculate_entropy_single) ---

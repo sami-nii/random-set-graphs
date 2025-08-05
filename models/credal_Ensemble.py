@@ -7,17 +7,16 @@ import os
 import sys
 import numpy as np
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from models.VanillaGNN import VanillaGNN # Important: It loads VanillaGNN models
+from models.VanillaGNN import VanillaGNN
 from utils.math import compute_uncertainties
-from torchmetrics import Accuracy, F1Score, AUROC 
+from torchmetrics import Accuracy, F1Score, AUROC
 
 class credal_Ensemble(L.LightningModule):
     """
-    A post-hoc, inference-only module to estimate credal uncertainty bounds
-    from an ensemble of pre-trained VanillaGNN models.
-
-    This module does not require training. It computes q_L and q_U by taking the
-    element-wise min and max of the softmax outputs from M vanilla models.
+    A post-hoc, inference-only module that estimates two types of uncertainty
+    from an ensemble of pre-trained VanillaGNN models:
+    1. Credal Uncertainty (q_L, q_U) via min/max bounds.
+    2. Classical Ensemble Uncertainty via entropy decomposition.
     """
     def __init__(
         self,
@@ -25,79 +24,93 @@ class credal_Ensemble(L.LightningModule):
         checkpoint_paths: list[str],
     ) -> None:
         super().__init__()
-        # This model has no trainable parameters, so hyperparameters are for logging/consistency
         self.save_hyperparameters()
 
-        # Load the ensemble of models from their checkpoints
         self.models = nn.ModuleList()
         print(f"Loading {len(checkpoint_paths)} models for the ensemble...")
         for path in checkpoint_paths:
             model = model_class.load_from_checkpoint(path)
-            # Freeze the model to be certain no training happens
             model.freeze() 
             self.models.append(model)
         
         if not self.models:
             raise ValueError("checkpoint_paths cannot be empty.")
 
-        # Get the number of output classes from the first model
         self.C = self.models[0].C
-
-        # Initialize metrics for the test step
         self.accuracy_metric = Accuracy(task="multiclass", num_classes=self.C)
         self.f1_metric = F1Score(task="multiclass", num_classes=self.C)
         self.auroc_metric = AUROC(task="binary")
 
+    @staticmethod
+    def _calculate_shannon_entropy(probs: torch.Tensor, epsilon: float = 1e-12) -> torch.Tensor:
+        """Calculates Shannon entropy for a probability distribution."""
+        # Clamp probabilities to avoid log(0)
+        probs_clipped = torch.clamp(probs, min=epsilon)
+        return -torch.sum(probs * torch.log2(probs_clipped), dim=-1)
+
     def forward(self, data):
         """
-        Performs a forward pass through all models in the ensemble to compute
-        the credal bounds q_L and q_U.
+        Performs a forward pass to compute credal bounds and stacked probabilities.
+        Returns:
+            q_L (torch.Tensor): Lower probability bounds.
+            q_U (torch.Tensor): Upper probability bounds.
+            stacked_probs (torch.Tensor): The raw probabilities from all models.
         """
         all_probs = []
-
-        # 1. Get softmax probabilities from each model in the ensemble
         for model in self.models:
             logits = model(data)
             probs = F.softmax(logits, dim=1)
             all_probs.append(probs)
 
-        # 2. Stack probabilities along a new 'ensemble' dimension
         # Shape: [num_models, num_nodes, num_classes]
-        stacked_probs = torch.stack(all_probs, dim=0) # TODO check if this is correct
+        stacked_probs = torch.stack(all_probs, dim=0)
 
-        # 3. Compute q_L and q_U by taking min and max over the ensemble dimension
         q_L = torch.min(stacked_probs, dim=0).values
         q_U = torch.max(stacked_probs, dim=0).values
 
-        return q_L, q_U
+        return q_L, q_U, stacked_probs
 
     def test_step(self, batch, batch_idx):
-        # The logic here is identical to your credal_GNN_t test_step,
-        # allowing for a direct and fair comparison.
-        q_L, q_U = self(batch)
+        q_L, q_U, stacked_probs = self(batch)
 
+        # Isolate the test nodes for all tensors
         q_L_test = q_L[batch.test_mask].detach().cpu()
         q_U_test = q_U[batch.test_mask].detach().cpu()
+        stacked_probs_test = stacked_probs[:, batch.test_mask, :].detach().cpu()
         y_test = batch.y[batch.test_mask].detach().cpu()
 
-        # Uncertainty Metrics (OOD Detection)
+        # --- 1. Credal Uncertainty Calculation (Your original method) ---
         TU, AU, EU = compute_uncertainties(q_L_test.numpy(), q_U_test.numpy()) 
-        targets = 1 - y_test.sum(axis=1)
-        auroc_EU = self.auroc_metric(torch.from_numpy(EU), targets)
-        self.log("test_auroc_EU", auroc_EU)
-        self.log("test_auroc_AU", self.auroc_metric(torch.from_numpy(AU), targets))
-        self.log("test_auroc_TU", self.auroc_metric(torch.from_numpy(TU), targets))
-
+        targets = 1 - y_test.sum(axis=1) # 1 for OOD, 0 for ID
         
-        return auroc_EU
+        print("\n--- Credal Uncertainty (Min/Max Bounds) ---")
+        self.log("auroc_EU_credal", self.auroc_metric(torch.from_numpy(EU), targets))
+        self.log("auroc_AU_credal", self.auroc_metric(torch.from_numpy(AU), targets))
+        self.log("auroc_TU_credal", self.auroc_metric(torch.from_numpy(TU), targets))
+
+        # --- 2. Classical Ensemble Uncertainty Calculation (New method) ---
+        # p_tilde: Mean of predictions across the ensemble
+        # Shape: [num_test_nodes, num_classes]
+        mean_probs = torch.mean(stacked_probs_test, dim=0)
+
+        # TU_classic: Total Uncertainty = Entropy of the mean prediction
+        TU_classic = self._calculate_shannon_entropy(mean_probs)
+
+        # AU_classic: Aleatoric Uncertainty = Mean of the individual entropies
+        individual_entropies = self._calculate_shannon_entropy(stacked_probs_test)
+        AU_classic = torch.mean(individual_entropies, dim=0)
+
+        # EU_classic: Epistemic Uncertainty = Disagreement among models
+        EU_classic = TU_classic - AU_classic
+        
+        print("--- Classical Ensemble Uncertainty (Entropy Decomp.) ---")
+        self.log("auroc_EU_classic", self.auroc_metric(EU_classic, targets))
+        self.log("auroc_AU_classic", self.auroc_metric(AU_classic, targets))
+        self.log("auroc_TU_classic", self.auroc_metric(TU_classic, targets))
+        
+
 
     # --- Non-Trainable Methods ---
-    def training_step(self, batch, batch_idx):
-        pass
-
-    def validation_step(self, batch, batch_idx):
-        pass
-
-    def configure_optimizers(self):
-        # This model has no parameters to optimize
-        return None
+    def training_step(self, batch, batch_idx): pass
+    def validation_step(self, batch, batch_idx): pass
+    def configure_optimizers(self): return None
