@@ -135,7 +135,7 @@ def load_coauthor_cs(DATASET_STORAGE_PATH, config):
     data.y = new_y
     
     # --- 5. Create DataLoaders ---
-    if config.get("batch_size", 1) <= 0:
+    if config.get("batch_size", -1) <= 0:
         print("Using DataLoader for full-batch training.")
         train_loader = DataLoader([data], batch_size=1, shuffle=False)
     else:

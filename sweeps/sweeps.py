@@ -14,11 +14,21 @@ sweep_vanilla = {
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
         "hidden_channels": {"values": [64, 128, 256, 512]},
         "num_layers": {"values": [1, 2, 3, 4]},
-        "batch_size": {"values": [1]},
-        "weight_decay": {"distribution": "uniform", "min": 1e-6, "max": 1e-1},
-        "gnn_type": {"values": ["GCN", "SAGE", "GAT", "GIN", "EdgeCNN"]},
+        "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
+        "gnn_type": {"values": ["GCN", "SAGE", "GAT", "GIN"]},
         "patience": {"values": [30]},
     }
+}
+
+sweep_ensemble = {
+    "method": "grid", 
+    "metric": {
+        "name": "test_auroc_EU", 
+        "goal": "maximize"
+    },
+    "parameters": {
+        "M": {"values": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]},
+    },
 }
 
 
@@ -32,28 +42,10 @@ sweep_credal = {
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
         "hidden_channels": {"values": [64, 128, 256]},
         "num_layers": {"values": [1, 2, 3]},
-        "batch_size": {"values": [-1]},
-        "num_neighbors": {"values": [-1]},
-        "weight_decay": {"distribution": "uniform", "min": 1e-6, "max": 1e-1},
+        "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
         "delta": {"distribution": "uniform", "min": 0.5, "max": 1.0},
         "gnn_type": {"values": ["GCN", "SAGE"]},
         "patience": {"values": [10]},
-    },
-}
-
-
-sweep_ensemble = {
-    "method": "grid", 
-    "metric": {
-        "name": "test_auroc_EU", 
-        "goal": "maximize"
-    },
-    "parameters": {
-
-        "M": {
-            "values": [3, 5, 7, 10, 15]  
-        },
-
     },
 }
 
@@ -67,10 +59,8 @@ sweep_credal_LJ = {
     "parameters": {
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
         "hidden_channels": {"values": [32, 64, 128, 256]},
-        "num_layers": {"values": [1, 2, 3]},
-        "batch_size": {"values": [-1]},
-        "num_neighbors": {"values": [-1]},
-        "weight_decay": {"distribution": "uniform", "min": 1e-6, "max": 1e-1},
+        "num_layers": {"values": [2, 3, 4, 5]},
+        "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
         "delta": {"distribution": "uniform", "min": 0.5, "max": 1.0},
         "gnn_type": {"values": ["GCN", "SAGE"]},
         "patience": {"values": [10]},
