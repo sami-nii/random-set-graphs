@@ -1,3 +1,4 @@
+import torch
 import wandb
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
@@ -7,6 +8,7 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from dataset_loader.dataset_loader import dataset_loader
+import gc
 
 
 def vanilla_train(project_name, dataset_name, save_path):
@@ -64,3 +66,9 @@ def vanilla_train(project_name, dataset_name, save_path):
 
     # Finalize the wandb run
     wandb.finish()
+
+    del model
+    del trainer
+    del train_loader, val_loader, test_loader 
+    gc.collect() 
+    torch.cuda.empty_cache()

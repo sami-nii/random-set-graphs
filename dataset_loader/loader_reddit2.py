@@ -7,7 +7,7 @@ import numpy as np
 
 import torch_geometric
 from torch_geometric.data import Data, InMemoryDataset, download_google_url
-from torch_geometric.loader import DataLoader
+from torch_geometric.loader import DataLoader, NeighborLoader
 
 import os
 import os.path as osp
@@ -204,8 +204,22 @@ def load_reddit2(DATASET_STORAGE_PATH, config):
     new_y[id_node_mask] = one_hot_encode(remapped_id_labels, num_id_classes)
     data.y = new_y
     
-    # --- 5. Create DataLoaders ---
-    train_loader = DataLoader([data], batch_size=1, shuffle=False)
+    # ==============================================================================
+    # --- 5. Create DataLoaders (with Mini-Batching Logic) ---
+    # ==============================================================================
+    if config.get("batch_size", -1) <= 0:
+        print("Using DataLoader for full-batch training.")
+        train_loader = DataLoader([data], batch_size=1, shuffle=False)
+    else:
+        print(f"Using NeighborLoader for mini-batch training with batch size {config['batch_size']}.")
+        train_loader = NeighborLoader(
+            data,
+            input_nodes=data.train_mask, # Crucial: sample starting nodes from the train mask
+            batch_size=config["batch_size"],
+            num_neighbors=[int(config.get('num_neighbors', 10))] * int(config.get("num_layers", 2)),
+            shuffle=True
+        )
+
     val_loader = DataLoader([data], batch_size=1, shuffle=False)
     test_loader = DataLoader([data], batch_size=1, shuffle=False)
 

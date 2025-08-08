@@ -7,6 +7,8 @@ import sys
 from models.credal_GNN_LJ import credal_GNN_LJ
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from dataset_loader.dataset_loader import dataset_loader
+import torch
+import gc
 
 
 
@@ -53,3 +55,9 @@ def credal_LJ_train(project_name, dataset_name, **kwargs):
 
     # Finalize the wandb run
     wandb.finish()
+
+    del model
+    del trainer
+    del train_loader, val_loader, test_loader 
+    gc.collect() 
+    torch.cuda.empty_cache()

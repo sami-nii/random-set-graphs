@@ -1,10 +1,54 @@
 
-metadata_chameleon = {"in_channels": {"values": [2325]}, "out_channels": {"values": [3]}}
-metadata_squirrel  = {"in_channels": {"values": [2089]}, "out_channels": {"values": [3]}}
-metadata_cora      = {"in_channels": {"values": [1433]}, "out_channels": {"values": [3]}}
-metadata_patents   = {"in_channels": {"values": [269]},  "out_channels": {"values": [3]}}
-metadata_arxiv     = {"in_channels": {"values": [128]},  "out_channels": {"values": [3]}}
-metadata_reddit2   = {"in_channels": {"values": [602]},  "out_channels": {"values": [30]}}
+
+# --- Small Datasets (Full-Batch Training) ---
+# batch_size = -1 signals the loader to use the full graph.
+metadata_chameleon = {
+    "in_channels": {"values": [2325]}, 
+    "out_channels": {"values": [3]},
+    "batch_size": {"values": [-1]},
+    "num_neighbors": {"values": [-1]},
+}
+metadata_squirrel  = {
+    "in_channels": {"values": [2089]}, 
+    "out_channels": {"values": [3]},
+    "batch_size": {"values": [-1]},
+    "num_neighbors": {"values": [-1]},
+}
+metadata_cora      = {
+    "in_channels": {"values": [1433]}, 
+    "out_channels": {"values": [3]},
+    "batch_size": {"values": [-1]},
+    "num_neighbors": {"values": [-1]},
+}
+
+# --- Large Datasets (Mini-Batch Training) ---
+# A positive batch_size signals the loader to use NeighborLoader.
+# These values are chosen as sensible defaults for a ~40GB GPU.
+metadata_patents   = {
+    "in_channels": {"values": [269]},  
+    "out_channels": {"values": [3]},
+    "batch_size": {"values": [16384]},
+    "num_neighbors": {"values": [10]},
+}
+metadata_arxiv     = {
+    "in_channels": {"values": [128]},  
+    "out_channels": {"values": [3]},
+    "batch_size": {"values": [16384]},
+    "num_neighbors": {"values": [10]},
+}
+metadata_reddit2   = {
+    "in_channels": {"values": [602]},  
+    "out_channels": {"values": [30]},
+    "batch_size": {"values": [-1]},
+    "num_neighbors": {"values": [10]},
+}
+metadata_coauthor  = {
+    "in_channels": {"values": [6805]}, 
+    "out_channels": {"values": [11]},
+    "batch_size": {"values": [16384]},
+    "num_neighbors": {"values": [10]},
+}
+
 
 
 sweep_vanilla = {
@@ -12,10 +56,10 @@ sweep_vanilla = {
     "metric": {"name": "val_f1", "goal": "maximize"},
     "parameters": {
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
-        "hidden_channels": {"values": [64, 128, 256, 512]},
-        "num_layers": {"values": [1, 2, 3, 4]},
+        "hidden_channels": {"values": [64, 128, 256]},
+        "num_layers": {"values": [2, 3]},
         "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
-        "gnn_type": {"values": ["GCN", "SAGE", "GAT", "GIN"]},
+        "gnn_type": {"values": ["GCN", "SAGE"]},
         "patience": {"values": [30]},
     }
 }
@@ -41,7 +85,7 @@ sweep_credal = {
     "parameters": {
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
         "hidden_channels": {"values": [64, 128, 256]},
-        "num_layers": {"values": [1, 2, 3]},
+        "num_layers": {"values": [2, 3]},
         "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
         "delta": {"distribution": "uniform", "min": 0.5, "max": 1.0},
         "gnn_type": {"values": ["GCN", "SAGE"]},
@@ -58,8 +102,8 @@ sweep_credal_LJ = {
     },
     "parameters": {
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
-        "hidden_channels": {"values": [32, 64, 128, 256]},
-        "num_layers": {"values": [2, 3, 4, 5]},
+        "hidden_channels": {"values": [64, 128, 256]},
+        "num_layers": {"values": [2, 3]},
         "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
         "delta": {"distribution": "uniform", "min": 0.5, "max": 1.0},
         "gnn_type": {"values": ["GCN", "SAGE"]},
