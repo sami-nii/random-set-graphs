@@ -27,13 +27,13 @@ metadata_cora      = {
 metadata_patents   = {
     "in_channels": {"values": [269]},  
     "out_channels": {"values": [3]},
-    "batch_size": {"values": [16384]},
+    "batch_size": {"values": [-1]},
     "num_neighbors": {"values": [10]},
 }
 metadata_arxiv     = {
     "in_channels": {"values": [128]},  
     "out_channels": {"values": [3]},
-    "batch_size": {"values": [16384]},
+    "batch_size": {"values": [-1]},
     "num_neighbors": {"values": [10]},
 }
 metadata_reddit2   = {
@@ -45,7 +45,7 @@ metadata_reddit2   = {
 metadata_coauthor  = {
     "in_channels": {"values": [6805]}, 
     "out_channels": {"values": [11]},
-    "batch_size": {"values": [16384]},
+    "batch_size": {"values": [-1]},
     "num_neighbors": {"values": [10]},
 }
 
