@@ -110,3 +110,56 @@ sweep_credal_LJ = {
         "patience": {"values": [10]},
     },
 }
+
+
+sweep_mahalanobis_advanced = {
+    "method": "grid",  
+    "metric": {
+        "name": "val_auroc", 
+        "goal": "maximize"
+    },
+    "parameters": {
+        "noise_magnitude": {
+            "values": [0.0, 0.001, 0.005, 0.01, 0.05]
+        }
+    },
+}
+
+
+
+sweep_knn = {
+    "method": "grid",
+    "metric": {
+        "name": "val_auroc", 
+        "goal": "maximize"
+    },
+    "parameters": {
+        "k": {
+            "values": [5, 10, 20, 50, 100, 200]
+        }
+    },
+}
+
+sweep_energy = {
+    "method": "grid",
+    "metric": {
+        "name": "val_auroc", 
+        "goal": "maximize"
+    },
+    "parameters": {
+        "dummy_run_id": {"values": [1]} # A dummy parameter to ensure the agent runs exactly once.
+    },
+}
+
+sweep_knn_LJ = {
+    "method": "grid",
+    "metric": {
+        "name": "val_auroc", 
+        "goal": "maximize"
+    },
+    "parameters": {
+        "k": {
+            "values": [5, 10, 20, 50, 100, 200]
+        }
+    },
+}

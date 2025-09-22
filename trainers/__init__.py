@@ -6,7 +6,10 @@ from .odin_tester import odin_test
 from .credal_trainer import credal_train
 from .ensamble_tester import ensemble_tester
 from .credal_LJ_trainer import credal_LJ_train
-
+from .mahalanobis_tester import mahalanobis_test
+from .knn_tester import knn_test
+from .energy_tester import energy_test
+from .knn_LJ_tester import knn_LJ_test
 
 # -- Do it automatically --
 

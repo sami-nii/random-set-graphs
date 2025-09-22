@@ -4,3 +4,4 @@ matplotlib
 lightning
 torchdyn
 ood-metrics
+faiss-gpu
