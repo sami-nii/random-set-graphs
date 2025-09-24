@@ -163,3 +163,15 @@ sweep_knn_LJ = {
         }
     },
 }
+
+sweep_gnnsafe = {
+    "method": "grid",
+    "metric": {
+        "name": "val_auroc", 
+        "goal": "maximize"
+    },
+    "parameters": {
+        "K": {"values": [1, 2, 4, 8, 16]},
+        "alpha": {"values": [0.1, 0.3, 0.5, 0.7, 0.9]}
+    },
+}
