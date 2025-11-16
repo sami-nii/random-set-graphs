@@ -175,3 +175,12 @@ sweep_gnnsafe = {
         "alpha": {"values": [0.1, 0.3, 0.5, 0.7, 0.9]}
     },
 }
+
+sweep_gebm = {
+    "method": "grid",
+    "metric": {"name": "auroc_GEBM", "goal": "maximize"},
+    "parameters": {
+        # keep consistent with your other sweeps
+        "seed": {"values": [0, 1, 2]},
+    },
+}

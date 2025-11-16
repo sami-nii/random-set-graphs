@@ -10,7 +10,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # --- Import your custom modules ---
-from models.gnnsafe_detector import GNNSafeDetector
+from models.gnnSafe_detector import GNNSafeDetector
 from dataset_loader.dataset_loader import dataset_loader
 from utils.model_manager import search_best_model
 

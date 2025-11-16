@@ -33,7 +33,7 @@ parser.add_argument(
     "-m",
     "--model",
     type=str,
-    choices=["vanilla", "credal", "ensemble", "credal_LJ", "odin", "mahalanobis", "knn", "energy", "gnnsafe", "knn_LJ"],
+    choices=[ "vanilla", "credal", "ensemble", "credal_LJ", "odin", "mahalanobis", "knn", "energy", "gnnsafe", "knn_LJ", "gebm" ],
     default="vanilla",
     help="Model to run the sweep on.",
 )
@@ -92,7 +92,7 @@ elif args.model == "mahalanobis":
 elif args.model == "credal":
     train_func = trainers.credal_train
 elif args.model == "ensemble":
-    train_func = trainers.ensemble_test
+    train_func = trainers.ensemble_tester
 elif args.model == "credal_LJ":
     train_func = trainers.credal_LJ_train
 elif args.model == "knn_LJ": 
@@ -102,7 +102,9 @@ elif args.model == "knn":
 elif args.model == "energy": 
     train_func = trainers.energy_test
 elif args.model == "gnnsafe": 
-    train_func = trainers.gnnsafe_test 
+    train_func = trainers.gnnsafe_tester 
+elif args.model == "gebm":
+    train_func = trainers.gebm_test
 else:
     raise ValueError(f"Unsupported model: {args.model}")
 
