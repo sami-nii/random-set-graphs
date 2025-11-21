@@ -21,9 +21,7 @@ metadata_cora      = {
     "num_neighbors": {"values": [-1]},
 }
 
-# --- Large Datasets (Mini-Batch Training) ---
-# A positive batch_size signals the loader to use NeighborLoader.
-# These values are chosen as sensible defaults for a ~40GB GPU.
+
 metadata_patents   = {
     "in_channels": {"values": [269]},  
     "out_channels": {"values": [3]},
@@ -48,7 +46,18 @@ metadata_coauthor  = {
     "batch_size": {"values": [-1]},
     "num_neighbors": {"values": [10]},
 }
-
+metadata_amazon_ratings = {
+    "in_channels":  {"values": [300]},  
+    "out_channels": {"values": [3]},    
+    "batch_size":   {"values": [-1]},   
+    "num_neighbors":{"values": [10]},
+}
+metadata_roman_empire = {
+    "in_channels":  {"values": [300]},  
+    "out_channels": {"values": [13]},   # ID classes = {5..17}
+    "batch_size":   {"values": [-1]},   
+    "num_neighbors":{"values": [10]},
+}
 
 
 sweep_vanilla = {
@@ -181,6 +190,6 @@ sweep_gebm = {
     "metric": {"name": "auroc_GEBM", "goal": "maximize"},
     "parameters": {
         # keep consistent with your other sweeps
-        "seed": {"values": [0, 1, 2]},
+        "seed": {"values": [0, 1, 2, 3, 4]},
     },
 }

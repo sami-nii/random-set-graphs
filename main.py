@@ -16,7 +16,7 @@ parser.add_argument(
     "-d", 
     "--dataset",
     type=str,
-    choices=["chameleon", "patents", "arxiv", "reddit2", "coauthor", "squirrel"],
+    choices=["chameleon", "patents", "arxiv", "reddit2", "coauthor", "squirrel", "amazon_ratings", "cora", "roman_empire"],
     default="squirrel",
     help="Dataset to run the sweep on.",
 )
@@ -89,7 +89,7 @@ elif args.model == "odin":
     train_func = trainers.odin_test
 elif args.model == "mahalanobis":
     train_func = trainers.mahalanobis_test 
-elif args.model == "credal":
+elif args.model == "credal": # credal final
     train_func = trainers.credal_train
 elif args.model == "ensemble":
     train_func = trainers.ensemble_tester

@@ -1,111 +1,152 @@
 # models/GEBMModule.py
 import torch
-import lightning as L
 import torch.nn.functional as F
+import lightning as L
 from torchmetrics import AUROC, Accuracy, F1Score
+
+# ---- Python 3.10 backports ----
+import enum, typing as _typing
+if not hasattr(enum, "StrEnum"):
+    class StrEnum(str, enum.Enum):
+        def __str__(self): return str(self.value)
+    enum.StrEnum = StrEnum
+
+try:
+    from typing import Self as _Self
+except Exception:
+    from typing_extensions import Self as _Self
+    setattr(_typing, "Self", _Self)
+# --------------------------------
 
 from models.VanillaGNN import VanillaGNN
 
 from graph_ebm.graph_uq.gebm import GraphEBMWrapper
 
-
 class GEBMModule(L.LightningModule):
-    """
-    Post-hoc, inference-only LightningModule that:
-      1) Loads a trained VanillaGNN checkpoint.
-      2) Fits GEBM on training nodes using logits+embeddings computed WITH edges.
-      3) Evaluates uncertainty on logits+embeddings computed WITHOUT edges,
-         while GEBM's own diffusion still uses the real graph.
-    Notes:
-      - Embeddings are set to logits (VanillaGNN doesn't expose penultimate features).
-        This keeps the interface simple and works out-of-the-box.
-    """
+    """Post-hoc GEBM evaluator using joint embeddings and explicit train/test masks."""
+
     def __init__(self, checkpoint_path: str):
         super().__init__()
-        self.save_hyperparameters()
-        self.model: VanillaGNN = VanillaGNN.load_from_checkpoint(checkpoint_path)
-        self.model.freeze()
+        self.backbone: VanillaGNN = VanillaGNN.load_from_checkpoint(checkpoint_path)
+        self.backbone.freeze()
 
         self.gebm = GraphEBMWrapper()
-        self.fitted = False
+        self.C = self.backbone.C
 
-        self.C = self.model.C
         self.auroc_metric = AUROC(task="binary")
         self.acc_metric = Accuracy(task="multiclass", num_classes=self.C)
-        self.f1_metric = F1Score(task="multiclass", num_classes=self.C)
+        self.f1_metric  = F1Score(task="multiclass", num_classes=self.C)
 
+        self._fitted = False
+        self._edge_index_cpu = None
+
+    # ---------------------------
+    # Backbone utilities
+    # ---------------------------
     @torch.no_grad()
-    def _compute_logits(self, data) -> torch.Tensor:
-        return self.model(data)
+    def _compute_logits(self, data):
+        return self.backbone(data)
 
     @staticmethod
     def _onehot_to_indices(y_onehot: torch.Tensor) -> torch.Tensor:
-        # Handles mixed ID/OOD labels: OOD rows are all-zero one-hots.
         return torch.argmax(y_onehot, dim=1)
 
+    @torch.no_grad()
+    def _get_joint_embeddings(self, data):
+        """Concatenate embeddings from all layers of the frozen GNN backbone."""
+        all_embeddings = [data.x]
+        gnn = self.backbone.gnn_model
+        if not hasattr(gnn, 'convs') or not hasattr(gnn, 'act'):
+            raise NotImplementedError("Backbone GNN must expose 'convs' and 'act'.")
+        x = data.x
+        for i in range(gnn.num_layers):
+            x = gnn.convs[i](x, data.edge_index)
+            if i < gnn.num_layers - 1:
+                x = gnn.act(x)
+            all_embeddings.append(x)
+        return torch.cat(all_embeddings, dim=1)
+
+    # ---------------------------
+    # Fit GEBM
+    # ---------------------------
+    @torch.no_grad()
+    def fit_gebm(self, train_batch):
+        """Fit GEBM on nodes selected by train_mask."""
+        if not hasattr(train_batch, "train_mask"):
+            raise ValueError("Training batch must include a 'train_mask'.")
+        if not torch.any(train_batch.train_mask):
+            raise ValueError("'train_mask' is empty or all False in training batch.")
+
+        device = train_batch.x.device
+        mask_train = train_batch.train_mask
+
+        # WITH edges (network effects)
+        logits_with_edges = self._compute_logits(train_batch)
+        embeddings_with_edges = self._get_joint_embeddings(train_batch)
+        y_indices = self._onehot_to_indices(train_batch.y)
+
+        # move to CPU for GEBM
+        self.gebm.fit(
+            logits_with_edges.detach().cpu(),
+            embeddings_with_edges.detach().cpu(),
+            train_batch.edge_index.detach().cpu(),
+            y_indices.detach().cpu(),
+            mask_train.detach().cpu(),
+        )
+        self._fitted = True
+        self._edge_index_cpu = train_batch.edge_index.detach().cpu()
+
+    # ---------------------------
+    # Test GEBM
+    # ---------------------------
+    @torch.no_grad()
     def test_step(self, batch, batch_idx):
-        """
-        We assume a single transductive graph batch with train/val/test masks.
-        """
+        """Evaluate GEBM uncertainty on test nodes (requires test_mask)."""
+        if not self._fitted:
+            raise RuntimeError("Call fit_gebm(train_batch) before testing.")
+        if not hasattr(batch, "test_mask"):
+            raise ValueError("Test batch must include a 'test_mask'.")
+        if not torch.any(batch.test_mask):
+            raise ValueError("'test_mask' is empty or all False in test batch.")
+
         device = batch.x.device
 
-        # --- 1) FIT PHASE (WITH EDGES / network effects) --------------------
-        # Compute training-time logits and use them as "embeddings".
-        logits_with_edges = self._compute_logits(batch)                      # [N, C]
-        embeddings_with_edges = logits_with_edges                            # [N, C] (see note)
-        y_indices = self._onehot_to_indices(batch.y)                         # [N]
-        mask_train = batch.train_mask                                        # [N] bool
-
-        # Fit GEBM on training nodes; GEBM uses the real graph structure.
-        self.gebm.fit(
-            logits_with_edges, embeddings_with_edges,
-            batch.edge_index, y_indices, mask_train
-        )
-        self.fitted = True
-
-        # --- 2) EVAL PHASE (WITHOUT EDGES for the base model) ---------------
-        # Make an "edge-less" copy for the base model forward.
-        # (GEBM diffusion still receives the real edges below.)
+        # Base model forward without edges
         data_no_edges = batch.clone()
         data_no_edges.edge_index = torch.empty((2, 0), dtype=batch.edge_index.dtype, device=device)
+        logits_no_edges = self._compute_logits(data_no_edges)
+        embeddings_no_edges = self._get_joint_embeddings(data_no_edges)
 
-        logits_no_edges = self._compute_logits(data_no_edges)                # [N, C]
-        embeddings_no_edges = logits_no_edges                                # [N, C]
+        uq_all = self.gebm.get_uncertainty(
+            logits_unpropagated=logits_no_edges.detach().cpu(),
+            embeddings_unpropagated=embeddings_no_edges.detach().cpu(),
+            edge_index=self._edge_index_cpu,
+        )
 
-        # GEBM diffusion leverages the original graph (batch.edge_index).
-        uncertainty_all = self.gebm.get_uncertainty(
-            logits_unpropagated=logits_no_edges,
-            embeddings_unpropagated=embeddings_no_edges,
-            edge_index=batch.edge_index,
-        )                                                                    # [N]
-
-        # --- 3) Slice to TEST and compute metrics ---------------------------
-        test_mask = batch.test_mask
-        y_test = batch.y[test_mask].detach()
-        logits_test = logits_with_edges[test_mask].detach()  # for ID metrics
-        uq_test = uncertainty_all[test_mask].detach()
-
-        # OOD targets per your convention: 1 = OOD, 0 = ID
+        # select test nodes
+        test_mask_cpu = batch.test_mask.detach().cpu()
+        y_all_cpu = batch.y.detach().cpu()
+        y_test = y_all_cpu[test_mask_cpu]
+        uq_test = uq_all[test_mask_cpu]
         ood_targets = 1 - y_test.sum(dim=1)
 
-        # AUROC: higher uncertainty -> more OOD-like
         auroc_gebm = self.auroc_metric(uq_test, ood_targets)
+        self.log("test_auroc", auroc_gebm, prog_bar=True)
 
-        # Classification metrics on ID only (optional but matches your style)
+        # optional classification metrics
         id_mask = (y_test.sum(dim=1) == 1)
         if id_mask.any():
-            id_logits = logits_test[id_mask]
+            logits_with_edges = self._compute_logits(batch).detach().cpu()
+            logits_test_cpu = logits_with_edges[test_mask_cpu]
+            id_logits = logits_test_cpu[id_mask]
             id_labels = torch.argmax(y_test[id_mask], dim=1)
             id_preds = torch.argmax(F.softmax(id_logits, dim=1), dim=1)
-            id_acc = self.acc_metric(id_preds, id_labels)
-            id_f1 = self.f1_metric(id_preds, id_labels)
-            self.log("test_acc", id_acc)
-            self.log("test_f1", id_f1)
+            self.log("test_acc", self.acc_metric(id_preds, id_labels))
+            self.log("test_f1",  self.f1_metric(id_preds, id_labels))
 
-        self.log("auroc_GEBM", auroc_gebm, prog_bar=True)
         return auroc_gebm
 
-    # No training/validation; this is post-hoc
+    # No training/val phases
     def training_step(self, *args, **kwargs): pass
     def validation_step(self, *args, **kwargs): pass
     def configure_optimizers(self): return None
