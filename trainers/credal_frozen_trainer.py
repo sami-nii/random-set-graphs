@@ -3,7 +3,7 @@ import sys
 import wandb
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
-
+from lightning.pytorch.callbacks import EarlyStopping
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.credal_frozen_LJ import CredalFrozenJoint
@@ -46,7 +46,9 @@ def credal_frozen_joint_train(project_name, dataset_name, **kwargs):
         accelerator="auto",
         logger=wandb_logger,
         log_every_n_steps=1,
-        max_epochs=config.get("max_epochs", 200),
+        callbacks=[
+            EarlyStopping(monitor="val_loss", patience=config["patience"]),
+        ],
     )
 
     print(f"\n--- Training Credal-on-Frozen-Joint on {dataset_name} ---")
