@@ -193,3 +193,15 @@ sweep_gebm = {
         "seed": {"values": [0, 1, 2, 3, 4]},
     },
 }
+
+sweep_frozen = {
+    "method": "bayes",
+    "metric": {"name": "val_auroc_EU", "goal": "maximize"},
+    "parameters": {
+        "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
+        "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
+        "seed": {"values": [0, 1, 2, 3, 4]},
+        "delta": {"distribution": "uniform", "min": 0.5, "max": 1.0},
+        "max_epochs": {"values": [200]},
+    },
+}
