@@ -101,3 +101,13 @@
 # CUDA_VISIBLE_DEVICES=-1 python main.py --dataset amazon_ratings --model knn  ;
 # CUDA_VISIBLE_DEVICES=-1 python main.py --dataset cora --model knn  ;
 # CUDA_VISIBLE_DEVICES=-1 python main.py --dataset roman_empire --model knn ;
+
+# CUDA_VISIBLE_DEVICES=-1 python main.py --dataset squirrel --model energy  ;
+# CUDA_VISIBLE_DEVICES=-1 python main.py --dataset arxiv --model energy  ;  
+# CUDA_VISIBLE_DEVICES=-1 python main.py --dataset coauthor --model energy  ;
+# CUDA_VISIBLE_DEVICES=-1 python main.py --dataset reddit2 --model energy  ;
+# CUDA_VISIBLE_DEVICES=-1 python main.py --dataset patents --model energy  ;
+# CUDA_VISIBLE_DEVICES=-1 python main.py --dataset chameleon --model energy  ;
+# CUDA_VISIBLE_DEVICES=-1 python main.py --dataset amazon_ratings --model energy  ;
+# CUDA_VISIBLE_DEVICES=-1 python main.py --dataset cora --model energy  ;
+# CUDA_VISIBLE_DEVICES=-1 python main.py --dataset roman_empire --model energy ;

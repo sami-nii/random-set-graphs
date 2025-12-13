@@ -12,7 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # --- Import your custom modules ---
 from models.energy_detector import EnergyDetector
 from dataset_loader.dataset_loader import dataset_loader
-from utils.model_manager import search_best_model
+from utils.model_manager import find_best_checkpoints
 
 def energy_test(project_name, dataset_name, save_path, **kwargs):
     """
@@ -23,7 +23,7 @@ def energy_test(project_name, dataset_name, save_path, **kwargs):
 
     # --- 1. Find the Best Backbone Checkpoint ---
     vanilla_model_dir = os.path.join(save_path, f"vanilla_{dataset_name}")
-    backbone_ckpt_path = search_best_model(vanilla_model_dir)
+    backbone_ckpt_path = find_best_checkpoints(dataset_name, num_models=1)[0]
     if not backbone_ckpt_path:
         raise FileNotFoundError(f"No backbone checkpoint found in {vanilla_model_dir}")
     print(f"Using backbone checkpoint: {backbone_ckpt_path}")
@@ -44,11 +44,7 @@ def energy_test(project_name, dataset_name, save_path, **kwargs):
     )
 
     # --- 4. Load Datasets ---
-    # We only need the validation and test loaders for evaluation.
-    # The loader must return the full graph in a single batch.
-    _, val_loader, _, test_loader = dataset_loader(
-        dataset_name, config={}, ood_test=True, batch_size=1, shuffle=False
-    )
+    _, val_loader, test_loader = dataset_loader(dataset_name, config)
     
     # --- 5. Run Validation and Test ---
     # No pre-computation step is needed for the Energy method.
