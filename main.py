@@ -98,11 +98,11 @@ elif args.model == "credal_LJ":
 elif args.model == "knn_LJ": 
     train_func = trainers.knn_LJ_test 
 elif args.model == "knn": 
-    train_func = trainers.knn_tester 
+    train_func = trainers.knn_test 
 elif args.model == "energy": 
     train_func = trainers.energy_test
 elif args.model == "gnnsafe": 
-    train_func = trainers.gnnsafe_tester 
+    train_func = trainers.gnnsafe_test 
 elif args.model == "gebm":
     train_func = trainers.gebm_test
 elif args.model == "frozen":

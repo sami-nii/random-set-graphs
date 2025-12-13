@@ -121,7 +121,7 @@ sweep_credal_LJ = {
 }
 
 
-sweep_mahalanobis_advanced = {
+sweep_mahalanobis = {
     "method": "grid",  
     "metric": {
         "name": "val_auroc", 
