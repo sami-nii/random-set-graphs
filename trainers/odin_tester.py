@@ -28,7 +28,7 @@ def odin_test(project_name, dataset_name, save_path, **kwargs):
         noise_magnitude=config.noise_magnitude
     )
 
-    # Load the dataset # TODO test this
+    # Load the dataset
     _, OOD_val_loader, OOD_test_loader = dataset_loader(dataset_name, config)
 
     trainer = Trainer(

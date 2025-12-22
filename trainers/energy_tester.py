@@ -19,7 +19,7 @@ def energy_test(project_name, dataset_name, save_path, **kwargs):
     Tests an EnergyDetector, a parameter-free post-hoc method for OOD detection.
     """
     wandb.init(project=project_name, job_type="test_energy")
-    config = wandb.config # Will be a dummy config from the sweep
+    config = wandb.config 
 
     # --- 1. Find the Best Backbone Checkpoint ---
     vanilla_model_dir = os.path.join(save_path, f"vanilla_{dataset_name}")
