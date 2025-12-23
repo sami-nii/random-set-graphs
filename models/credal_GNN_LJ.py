@@ -95,7 +95,6 @@ class credal_GNN_LJ(L.LightningModule):
 
 
     def training_step(self, batch, batch_idx):
-        # ... (This code is identical to your final credal_GNN_t) ...
         q_L, q_U = self(batch)
         y_train = batch.y[batch.train_mask]
         q_U_train = q_U[batch.train_mask]
@@ -144,7 +143,6 @@ class credal_GNN_LJ(L.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        # ... (This code is identical to your final credal_GNN_t) ...
         q_L, q_U = self(batch)
         q_L_test = q_L[batch.test_mask].detach().cpu()
         q_U_test = q_U[batch.test_mask].detach().cpu()
