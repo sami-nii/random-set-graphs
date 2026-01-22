@@ -48,26 +48,17 @@ def pignistic(m, focal_sets, num_classes):
             
             return betp
 
-class RandomSetLoss(nn.Module):
-    # Use negative loss assigned to any set containing classes that are true
-    def __init__(self, focal_sets):
-        super().__init__()
+class BinaryCrossEntropy(nn.Module):
+    def __init__(self, focal_sets, num_classes):
+        super().__init__
         self.focal_sets = focal_sets
+        self.num_classes = num_classes
+        self.cross_entropy = nn.CrossEntropyLoss()
 
     def forward(self, m, y):
+        betp = pignistic(m, self.focal_sets, self.num_classes)
         labels = torch.argmax(y, dim=1)
-        loss = 0.0
-
-        for i, A in enumerate(self.focal_sets):
-            if len(A) == 0:
-                continue
-            mask = torch.tensor(
-                [label.item() in A for label in labels],
-                device=m.device
-            )
-            loss -= torch.log(m[mask,i] + 1e-8).mean()
-
-        return loss
+        return self.cross_entropy(betp, labels)
     
     class random_set_GNN(L.LightningModule):
         # Metrics using pignistic probabilities.
