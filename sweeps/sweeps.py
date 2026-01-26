@@ -220,3 +220,14 @@ sweep_cagcn = {
         "patience": {"values": [10]},
     },
 }
+
+sweep_random_set = {
+    "method": "grid",
+    "metric": {"name": "val_acc", "goal": "maximize"},
+    "parameters": {
+        "lr": {"values": [1e-3]},
+        "hidden_channels": {"values": [64]},
+        "num_layers": {"values": [2]},
+    },
+}
+
