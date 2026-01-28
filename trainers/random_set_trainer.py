@@ -15,7 +15,8 @@ def random_set_train(project_name, dataset_name, **kwargs):
     wandb.init(project=project_name, config=kwargs)
     config = wandb.config
     wandb_logger = WandbLogger(project=project_name)
-
+    
+    # Load the dataset
     train_loader, val_loader, test_loader = dataset_loader(dataset_name, config)
 
     focal_sets = [
@@ -23,7 +24,7 @@ def random_set_train(project_name, dataset_name, **kwargs):
         {0,1}, {0,2}, {1,2},
         {0,1,2}
     ]
-
+    # Instantiate the model
     model = RandomSetGNN(
         gnn_type="GCN",
         in_channels=config.in_channels,
@@ -35,6 +36,7 @@ def random_set_train(project_name, dataset_name, **kwargs):
         weight_decay=config.get("weight_decay", 0.0)
     )
 
+    # Trainer setup
     trainer = L.Trainer(
         devices="auto",
         accelerator="auto",
@@ -46,11 +48,15 @@ def random_set_train(project_name, dataset_name, **kwargs):
         ]
     )
 
+    # Train and validate the model
     trainer.fit(model, train_loader, val_loader)
 
+    # Test the model
     trainer.test(model, test_loader)
 
+    # Finalize the wandb run
     wandb.finish()
+    
     del model, trainer, train_loader, val_loader, test_loader
     gc.collect()
     torch.cuda.empty_cache()
