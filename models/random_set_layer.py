@@ -5,6 +5,9 @@ import torch.nn.functional as F
 from torchmetrics import Accuracy, F1Score
 from torch_geometric.nn.models import GCN, GraphSAGE, GAT, GIN, EdgeCNN
 from utils.math import compute_uncertainties
+import os
+import sys
+import numpy as np
 
 models_map = {
     "GCN": GCN, "SAGE": GraphSAGE, "GAT": GAT, "GIN": GIN, "EdgeCNN": EdgeCNN
@@ -24,7 +27,7 @@ class RandomSetLayer(nn.Module):
         scores = torch.sigmoid(self.linear(x))
         return scores / (scores.sum(dim=-1, keepdim=True) + 1e-8)
     
-new_classes = focal_sets
+# new_classes = focal_sets
 # Classes = Classes from squirrel dataset
 
     
@@ -41,51 +44,54 @@ new_classes = focal_sets
 #     return betp
 
 def mass_coeff(new_classes):
+    num = len(new_classes)
+    mass_co = torch.zeros(num, num)
     for i, A in enumerate(new_classes):
         for j, B in enumerate(new_classes):
-            leng = 0
             if set(B).issubset(set(A)):
-                leng = (-1) ** (len(A) - len(B))
-            mass_co[j][i] = leng
+                mass_co[j, i] = (-1) ** (len(A) - len(B))
     return mass_co
 
-mass_co = np.zeros((len(new_classes), len(new_classes)))
+    # mass_co = np.zeros((len(new_classes), len(new_classes)))
     # mass_co = np.zeros((len(new_classes_1024), len(new_classes_1024)))
 
-mass_coeff_matrix = mass_coeff(new_classes)
-mass_coeff_matrix = tf.cast(mass_coeff_matrix, tf.float32)
+# mass_coeff_matrix = mass_coeff(new_classes)
+# mass_coeff_matrix = tf.cast(mass_coeff_matrix, tf.float32)
 
 #Mobius inverse function
-def belief_to_mass(test_preds, new_classes):
-    mass_coeff_matrix = mass_coeff(new_classes)
-    
-    test_preds_mass = test_preds @ mass_coeff_matrix
+def belief_to_mass(belief, focal_sets):
+    device = belief.device
+    num_sets = len(focal_sets)
 
-    test_preds_mass[test_preds_mass<0] = 0
-    sums_ = 1 - np.sum(test_preds_mass, axis=-1)
-    sums_[sums_<0] = 0
+    mass_coeff = torch.zeros(num_sets, num_sets, device=device)
 
-    test_preds_mass = np.append(test_preds_mass, sums_[:, None], axis=-1)
-    test_preds_mass = test_preds_mass/np.sum(test_preds_mass, axis=-1)[:, None]
-    
-    return test_preds_mass
+    for i, A in enumerate(focal_sets):
+        for j, B in enumerate(focal_sets):
+            if set(B).issubset(A):
+                mass_coeff[j, i] = (-1) ** (len(A) - len(B))
 
-def betp_approx(classes):
-  mask = []
-  for j, n in enumerate(classes):
-      mask.append([])
-      for k, A in enumerate(new_classes):
-          if set([n]).issubset(A):
-              mask[-1].append( 1 / len(A))
-          else:
-              mask[-1].append(0)
+    mass = belief @ mass_coeff
+    mass = torch.clamp(mass, min=0)
 
-  mask = np.array(mask).T
-  return mask
+    # normalize
+    mass = mass / (mass.sum(dim=-1, keepdim=True) + 1e-8)
+    return mass
+
+def betp_approx(classes, new_classes):
+    mask = []
+    for n in classes:
+        row = []
+        for A in new_classes:
+            if {n}.issubset(A):
+                row.append(1 / len(A))
+            else:
+                row.append(0)
+        mask.append(row)
+    return torch.tensor(mask).T
 
 # Pignistic probability
 def pignistic(mass, classes, new_classes):
-    betp_matrix = np.zeros((len(new_classes), len(classes)))
+    betp_matrix = torch.zeros((len(new_classes), len(classes)))
     for i,c in enumerate(classes): 
         for j,A in enumerate(new_classes):
             if set([c]).issubset(A):
@@ -99,29 +105,30 @@ class BinaryCrossEntropy(nn.Module):
     ALPHA = 0.01
     BETA = 0.01
 
-    def computeBCE(y_true, y_pred):
+    def __init__(self, mass_coeff_matrix):
+        super().__init__()
+        self.mass_coeff_matrix = mass_coeff_matrix
 
-        y_true = tf.cast(y_true, tf.float32)
-        y_true = K.clip(y_true, K.epsilon(), 1)
-        y_pred = K.clip(y_pred, K.epsilon(), 1 - K.epsilon())
-        term_0 = (1 - y_true) * K.log(1 - y_pred + K.epsilon())  
-        term_1 = y_true * K.log(y_pred + K.epsilon())
-        bce_loss = -K.mean(term_0 + term_1, axis=0)
-        
-        mass = tf.matmul(y_pred, mass_coeff_matrix)
+    def forward(self, y_pred, y_true):
+        eps = 1e-8
 
-        # alpha = tf.cast(tf.where(mass >= 0, tf.ones_like(mass), tf.zeros_like(mass)), dtype=tf.float32)
-        
-        mass_reg = K.mean(tf.nn.relu(-mass))
+        y_true = y_true.float().clamp(eps, 1)
+        y_pred = y_pred.clamp(eps, 1 - eps)
 
-        mass_sum = tf.nn.relu(K.mean(K.sum(mass, axis=-1)) - 1)
-        
-        #add alpha to bce term 1 or 2
-        # alpha_reg = -K.mean((1 - alpha) * K.log(1 - y_true + K.epsilon()) + alpha * K.log(y_true + K.epsilon()), axis = 0)
-        
+        term_0 = (1 - y_true) * torch.log(1 - y_pred)
+        term_1 = y_true * torch.log(y_pred)
+        bce_loss = -(term_0 + term_1).mean()
 
-        total_loss = bce_loss + ALPHA * mass_reg + BETA * mass_sum
-        # tf.print(K.mean(bce_loss), K.sum(mass_reg), K.mean(total_loss))
+        mass = y_pred @ self.mass_coeff_matrix.to(y_pred.device)
+
+        mass_reg = torch.relu(-mass).mean()
+        mass_sum = torch.relu(mass.sum(dim=-1).mean() - 1)
+
+        total_loss = (
+            bce_loss
+            + self.ALPHA * mass_reg
+            + self.BETA * mass_sum
+        )
 
         return total_loss
     
@@ -219,11 +226,11 @@ class RandomSetGNN(L.LightningModule):
     def test_step(self, batch, batch_idx):
         m = self(batch)
         y_test = batch.y
-        test_preds_mass = tf.matmul(m, mass_coeff_matrix)
-        test_preds_mass = np.array(test_preds_mass)
-        test_preds_mass[test_preds_mass<0] = 0
+        mass_coeff_tensor = mass_coeff_matrix.to(m.device)
+        test_preds_mass = torch.matmul(m, mass_coeff_tensor)
 
-        betp = test_preds_mass @ betp_approx(classes)
+        betp_matrix = betp_approx(y_test)
+        betp = torch.matmul(test_preds_mass, betp_matrix) 
 
         # betp = pignistic(m, self.focal_sets, self.num_classes)
         preds = betp.argmax(dim=1)
