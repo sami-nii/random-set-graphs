@@ -223,11 +223,12 @@ sweep_cagcn = {
 
 sweep_random_set = {
     "method": "grid",
-    "metric": {"name": "val_acc", "goal": "maximize"},
+    "metric": {"name": "val_auroc_entropy", "goal": "maximize"},
     "parameters": {
-        "lr": {"values": [1e-3]},
-        "hidden_channels": {"values": [64]},
-        "num_layers": {"values": [2]},
+        "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
+        "hidden_channels": {"values": [64, 128, 256]},
+        "num_layers": {"values": [2, 3]},
+        "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
     },
 }
 
