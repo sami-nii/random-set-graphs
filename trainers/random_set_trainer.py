@@ -19,10 +19,13 @@ def random_set_train(project_name, dataset_name, **kwargs):
     wandb.init(project=project_name, config=kwargs)
     config = wandb.config
     wandb_logger = WandbLogger(project=project_name)
+
+    # torch.set_float32_matmul_precision('medium')
     
     # 1. Load Dataset
     # Assumes transductive setting where loaders return the same graph object
     train_loader, val_loader, test_loader = dataset_loader(dataset_name, config)
+    print(f"Number of batches per epoch: {len(train_loader)}")
     
     # Get metadata from the first batch
     data_sample = next(iter(train_loader))
@@ -35,6 +38,10 @@ def random_set_train(project_name, dataset_name, **kwargs):
     # 2. Generate Full Power Set (2^N - 1)
     # We generate all non-empty subsets of the ID classes.
     # e.g., for 3 classes: {0}, {1}, {2}, {0,1}, {0,2}, {1,2}, {0,1,2}
+
+    # warning if num_id_classes is large
+    if num_id_classes > 10:
+        print(f"Warning: Number of ID classes is {num_id_classes}, generating full power set may be computationally expensive.")
     
     class_indices = list(range(num_id_classes))
     focal_sets_tuples = itertools.chain.from_iterable(
@@ -55,7 +62,7 @@ def random_set_train(project_name, dataset_name, **kwargs):
         in_channels=num_features,
         hidden_channels=config.get("hidden_channels", 64),
         num_layers=config.get("num_layers", 2),
-        focal_sets=focal_sets,     # <--- Passed here
+        focal_sets=focal_sets,     
         num_classes=num_id_classes,
         lr=config.get("lr", 0.001),
         weight_decay=config.get("weight_decay", 1e-4),

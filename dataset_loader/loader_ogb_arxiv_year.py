@@ -2,7 +2,7 @@ from torch_geometric.utils import subgraph
 from ogb.nodeproppred import NodePropPredDataset
 import torch_geometric
 import torch
-from torch_geometric.loader import DataLoader
+from torch_geometric.loader import DataLoader, NeighborLoader
 from .utils import one_hot_encode, even_quantile_labels
 
 
@@ -95,7 +95,18 @@ def load_ogb_arxiv_year(DATASET_STORAGE_PATH, config):
     data.y = new_y
     
     # --- 5. Create DataLoaders ---
-    train_loader = DataLoader([data], batch_size=1, shuffle=False)
+    if config.get("batch_size", -1) <= 0:
+        print("Using DataLoader for full-batch training.")
+        train_loader = DataLoader([data], batch_size=1, shuffle=False)
+    else:
+        print(f"Using NeighborLoader for mini-batch training with batch size {config['batch_size']}.")
+        train_loader = NeighborLoader(
+            data,
+            input_nodes=data.train_mask, # Crucial: sample starting nodes from the train mask
+            batch_size=config["batch_size"],
+            num_neighbors=[int(config.get('num_neighbors', 10))] * int(config.get("num_layers", 2)),
+            shuffle=True
+        )
     val_loader = DataLoader([data], batch_size=1, shuffle=False)
     test_loader = DataLoader([data], batch_size=1, shuffle=False)
 

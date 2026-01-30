@@ -25,13 +25,13 @@ metadata_cora      = {
 metadata_patents   = {
     "in_channels": {"values": [269]},  
     "out_channels": {"values": [3]},
-    "batch_size": {"values": [-1]},
+    "batch_size": {"values": [256]},
     "num_neighbors": {"values": [10]},
 }
 metadata_arxiv     = {
     "in_channels": {"values": [128]},  
     "out_channels": {"values": [3]},
-    "batch_size": {"values": [-1]},
+    "batch_size": {"values": [256]},
     "num_neighbors": {"values": [10]},
 }
 metadata_reddit2   = {
@@ -222,9 +222,10 @@ sweep_cagcn = {
 }
 
 sweep_random_set = {
-    "method": "grid",
+    "method": "bayes",
     "metric": {"name": "val_auroc_entropy", "goal": "maximize"},
     "parameters": {
+        "gnn_type": {"values": ["GAT"]},
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
         "hidden_channels": {"values": [64, 128, 256]},
         "num_layers": {"values": [2, 3]},
