@@ -40,10 +40,14 @@ def random_set_train(project_name, dataset_name, **kwargs):
     # e.g., for 3 classes: {0}, {1}, {2}, {0,1}, {0,2}, {1,2}, {0,1,2}
 
     # warning if num_id_classes is large
+
+    # 2. (edited) Generate Focal Sets (Power Set OR Budgeted)
+    class_indices = list(range(num_id_classes))
+
     if num_id_classes > 10:
         print(f"Warning: Number of ID classes is {num_id_classes}, generating full power set may be computationally expensive.")
     
-    class_indices = list(range(num_id_classes))
+    # class_indices = list(range(num_id_classes))
     focal_sets_tuples = itertools.chain.from_iterable(
         itertools.combinations(class_indices, r) for r in range(1, num_id_classes + 1)
     )
@@ -55,7 +59,28 @@ def random_set_train(project_name, dataset_name, **kwargs):
     print(f"Number of ID Classes: {num_id_classes}")
     print(f"Focal Sets Strategy: Full Power Set")
     print(f"Total Output Heads (2^N - 1): {len(focal_sets)}")
+
     
+    # Budget Override
+    if num_id_classes >= 10:
+           print("Replacing power set with budgeted focal sets")
+           aux_model = build_aux_embedding_model(
+                config,
+                num_features,
+                num_id_classes
+                )
+           
+           focal_sets = compute_budgeted_new_classes_from_data(
+                aux_model=aux_model,
+                data=data_sample,
+                budget_k=config.get("budget_k", 32),
+                batch_size=config.get("batch_size", 256),
+                num_classes_limit=num_id_classes
+                )
+           
+           print(f"Budgeted focal sets size: {len(focal_sets)}")
+
+
     # 3. Instantiate the Model
     model = RandomSetGNN(
         gnn_type=config.get("gnn_type", "GCN"),
