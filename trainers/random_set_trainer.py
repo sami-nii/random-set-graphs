@@ -7,6 +7,8 @@ import sys
 import torch
 import gc
 import itertools # <--- Added for power set generation
+from .budgeting import train_embeddings, fit_gmm, overlaps, ellipse
+
 
 # Adjust import paths as needed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -64,18 +66,29 @@ def random_set_train(project_name, dataset_name, **kwargs):
     # Budget Override
     if num_id_classes >= 10:
            print("Replacing power set with budgeted focal sets")
-           aux_model = build_aux_embedding_model(
-                config,
-                num_features,
-                num_id_classes
-                )
+           aux_model = model.gnn_model(config, num_features, num_id_classes)
+           device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+           # 1. Compute embeddings
+           x_train = data_sample.x.to(device)
+           y_train = data_sample.y.argmax(dim=-1).to(device)
+           train_embedded = train_embeddings(aux_model, x_train, batch_size=config.get("batch_size", 256), device=device)
            
-           focal_sets = compute_budgeted_new_classes_from_data(
-                aux_model=aux_model,
-                data=data_sample,
-                budget_k=config.get("budget_k", 32),
-                batch_size=config.get("batch_size", 256),
-                num_classes_limit=num_id_classes
+           # 2. Fit GMMs
+           classes = list(range(num_id_classes))
+           individual_gms = fit_gmm(classes, train_embedded, y_train)
+           
+           # 3. Ellipsoids
+           regions, means, max_len = ellipse(individual_gms, len(classes), device=device)
+           
+           focal_sets = overlaps(
+                k=config.get("budget_k", 32),
+                classes=[str(c) for c in classes],
+                num_clusters=num_id_classes,
+                classes_dict={str(c): c for c in classes},
+                regions=regions,
+                means=means,
+                max_len=max_len
                 )
            
            print(f"Budgeted focal sets size: {len(focal_sets)}")
