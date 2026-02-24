@@ -59,6 +59,13 @@ metadata_roman_empire = {
     "num_neighbors":{"values": [10]},
 }
 
+metadata_road = {
+    "in_channels":  {"values": [4]},   # x, y, width, height
+    "out_channels": {"values": [3]},   # 3 ID classes
+    "batch_size": {"values": [-1]},
+    "num_neighbors": {"values": [-1]},  # full-batch
+}
+
 
 sweep_vanilla = {
     "method": "bayes",

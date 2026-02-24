@@ -7,10 +7,10 @@ from dataset_loader.loader_reddit2 import load_reddit2
 from dataset_loader.loader_coauthor import load_coauthor_cs
 from dataset_loader.loader_amazon_ratings import load_amazon_ratings
 from dataset_loader.loader_roman_empire import load_roman_empire
+from dataset_loader.loader_road import loader_road_direct
 
 
-DATASET_STORAGE_PATH = "./dataset/"
-
+DATASET_STORAGE_PATH = "./dataset/road-dataset-master"
 
 def dataset_loader(dataset_name: str, config):
     if dataset_name == 'cora':
@@ -31,5 +31,7 @@ def dataset_loader(dataset_name: str, config):
         return load_amazon_ratings(DATASET_STORAGE_PATH, config)
     elif dataset_name == 'roman_empire':
         return load_roman_empire(DATASET_STORAGE_PATH, config)
+    elif dataset_name == "road":
+        return loader_road_direct(DATASET_STORAGE_PATH, config)
     else:
         raise ValueError(f"Dataset {dataset_name} not supported")

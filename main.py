@@ -16,7 +16,7 @@ parser.add_argument(
     "-d", 
     "--dataset",
     type=str,
-    choices=["chameleon", "patents", "arxiv", "reddit2", "coauthor", "squirrel", "amazon_ratings", "cora", "roman_empire"],
+    choices=["chameleon", "patents", "arxiv", "reddit2", "coauthor", "squirrel", "amazon_ratings", "cora", "roman_empire", "road" ],
     default="squirrel",
     help="Dataset to run the sweep on.",
 )
