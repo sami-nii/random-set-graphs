@@ -32,6 +32,6 @@ def dataset_loader(dataset_name: str, config):
     elif dataset_name == 'roman_empire':
         return load_roman_empire(DATASET_STORAGE_PATH, config)
     elif dataset_name == "road":
-        return loader_road(DATASET_STORAGE_PATH, split_ratio=(0.6, 0.2, 0.2))
+        return loader_road(DATASET_STORAGE_PATH, config)
     else:
         raise ValueError(f"Dataset {dataset_name} not supported")
