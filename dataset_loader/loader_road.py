@@ -1,122 +1,113 @@
 import os
+import json
 import torch
-import numpy as np
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from sklearn.neighbors import NearestNeighbors
-from .utils import one_hot_encode
 
-def loader_road_direct(DATASET_STORAGE_PATH, split_ratio=(0.6,0.2,0.2), k_spatial=5):
+def loader_road(DATASET_STORAGE_PATH, split_ratio=(0.6, 0.2, 0.2), k_spatial=5):
     """
-    Convert ROAD dataset directly into a single PyG Data object.
-    Nodes = agent instances
-    Edges = temporal + spatial
+    Loads ROAD dataset into a PyTorch Geometric graph.
+    Uses only preprocessed annotations, no video parsing.
+    Returns train/val/test DataLoaders with batch_size=1.
     """
-    if not os.path.exists(DATASET_STORAGE_PATH):
-        raise FileNotFoundError(f"ROAD dataset folder not found: {DATASET_STORAGE_PATH}")
 
-    videos = [v for v in os.listdir(DATASET_STORAGE_PATH) 
-              if os.path.isdir(os.path.join(DATASET_STORAGE_PATH, v))]
-    if len(videos) == 0:
-        raise FileNotFoundError(f"No video subfolders found in ROAD dataset path: {DATASET_STORAGE_PATH}")
-    videos.sort()
+    if len(split_ratio) != 3 or not abs(sum(split_ratio) - 1.0) < 1e-8:
+        raise ValueError("split_ratio must be a 3-tuple that sums to 1.0.")
+    if k_spatial < 1:
+        raise ValueError("k_spatial must be >= 1.")
+
+    json_file = os.path.join(DATASET_STORAGE_PATH, "road_trainval_v1.0.json")
+    with open(json_file, "r") as f:
+        final_annots = json.load(f)
 
     nodes = []
     labels = []
     edges = []
-    node_index = 0
-    track_last_node = {}
-    frame_node_indices = []
+    tube_last_node = {}
+    frame_nodes = {}
+    node_idx = 0
 
-    for video in videos:
-        video_path = os.path.join(DATASET_STORAGE_PATH, video)
-        annotation_path = os.path.join(video_path, "annotations")
+    db = final_annots["db"]
+    action_labels = final_annots["action_labels"]
 
-        if not os.path.exists(annotation_path):
-            raise FileNotFoundError(f"Annotations folder missing for video {video}: {annotation_path}")
+    # Step 1: collect nodes and temporal edges
+    for video_name in db.keys():
+        frames = db[video_name]["frames"]
+        for frame_id in frames.keys():
+            if frames[frame_id]["annotated"] == 0:
+                continue
 
-        frame_files = [f for f in os.listdir(annotation_path) if f.endswith(".txt")]
-        if len(frame_files) == 0:
-            raise FileNotFoundError(f"No annotation files found in {annotation_path}")
-        frame_files.sort()
+            annos = frames[frame_id]["annos"]
+            # Frame ids are reused across videos (e.g., "1", "2", ...), so scope by video.
+            frame_key = (video_name, frame_id)
+            frame_nodes[frame_key] = []
 
-        for frame_file in frame_files:
-            frame_nodes = []
-            frame_file_path = os.path.join(annotation_path, frame_file)
+            for anno_id in annos.keys():
+                anno = annos[anno_id]
 
-            with open(frame_file_path, "r") as f:
-                for line in f:
-                    parts = line.strip().split()
-                    if len(parts) < 6:
-                        continue
-                    track_id, x, y, w, h, action_id = map(int, parts[:6])
-                    nodes.append([x, y, w, h])
-                    labels.append(action_id)
-                    frame_nodes.append(node_index)
+                box = anno["box"]  # normalized [x1,y1,x2,y2]
+                tube_uid = anno["tube_uid"]
 
-                    if track_id in track_last_node:
-                        edges.append([track_last_node[track_id], node_index])
-                        edges.append([node_index, track_last_node[track_id]])
-                    track_last_node[track_id] = node_index
-                    node_index += 1
+                # Use first action label
+                if len(anno["action_ids"]) == 0:
+                    continue
+                action_id = anno["action_ids"][0]
 
-            frame_node_indices.append(frame_nodes)
+                nodes.append(box)
+                labels.append(action_id)
+                frame_nodes[frame_key].append(node_idx)
 
-            # Spatial edges using k-NN
-            if len(frame_nodes) > 1:
-                coords = np.array([nodes[i][:2] for i in frame_nodes])
-                k = min(k_spatial, len(frame_nodes)-1)
-                nbrs = NearestNeighbors(n_neighbors=k+1, algorithm="ball_tree").fit(coords)
-                _, neighbors = nbrs.kneighbors(coords)
-                for i, nbr_idxs in enumerate(neighbors):
-                    for j in nbr_idxs[1:]:
-                        edges.append([frame_nodes[i], frame_nodes[j]])
-                        edges.append([frame_nodes[j], frame_nodes[i]])
+                # Temporal edges along tubes
+                if tube_uid in tube_last_node:
+                    prev = tube_last_node[tube_uid]
+                    edges.append([prev, node_idx])
+                    edges.append([node_idx, prev])
+                tube_last_node[tube_uid] = node_idx
 
+                node_idx += 1
+
+    if len(nodes) == 0:
+        raise ValueError("No annotated nodes found in ROAD dataset.")
+
+    # Step 2: convert nodes and labels to tensors
     x = torch.tensor(nodes, dtype=torch.float)
     y_raw = torch.tensor(labels, dtype=torch.long)
-    edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+    num_classes = max(y_raw.max().item() + 1, len(action_labels))
+    y = torch.zeros((y_raw.shape[0], num_classes), dtype=torch.float)
+    y[torch.arange(y_raw.shape[0]), y_raw] = 1.0
+
+    # Step 3: add spatial edges (kNN per frame)
+    for frame_id in frame_nodes:
+        idxs = frame_nodes[frame_id]
+        if len(idxs) < 2:
+            continue
+
+        coords = x[idxs][:, :2]  # use x1,y1 for spatial
+        nbrs = NearestNeighbors(n_neighbors=min(k_spatial, len(idxs))).fit(coords)
+        _, indices = nbrs.kneighbors(coords)
+        for i, neighbors in enumerate(indices):
+            for j in neighbors:
+                if i != j:
+                    edges.append([idxs[i], idxs[j]])
+
+    if len(edges) == 0:
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+    else:
+        edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+
+    # Step 4: simple random split
     num_nodes = x.shape[0]
-
-    # Train/val/test split by track_id
-    track_ids = list(track_last_node.keys())
-    np.random.shuffle(track_ids)
-    num_tracks = len(track_ids)
-    train_end = int(split_ratio[0]*num_tracks)
-    val_end = train_end + int(split_ratio[1]*num_tracks)
-
-    # Map track to nodes
-    track_to_nodes = {}
-    for frame_nodes in frame_node_indices:
-        for idx in frame_nodes:
-            for t_id, last_idx in track_last_node.items():
-                if last_idx >= idx:
-                    track_to_nodes.setdefault(t_id, []).append(idx)
-                    break
+    perm = torch.randperm(num_nodes)
+    train_end = int(split_ratio[0] * num_nodes)
+    val_end = train_end + int(split_ratio[1] * num_nodes)
 
     train_mask = torch.zeros(num_nodes, dtype=torch.bool)
     val_mask = torch.zeros(num_nodes, dtype=torch.bool)
     test_mask = torch.zeros(num_nodes, dtype=torch.bool)
-    for i, t_id in enumerate(track_ids):
-        mask = torch.tensor(track_to_nodes[t_id], dtype=torch.long)
-        if i < train_end:
-            train_mask[mask] = True
-        elif i < val_end:
-            val_mask[mask] = True
-        else:
-            test_mask[mask] = True
-
-    # ID/OOD split
-    IDclass = [0,1,2]
-    OODclass = [3,4]
-
-    id_mask = torch.isin(y_raw, torch.tensor(IDclass))
-    train_mask = train_mask & id_mask
-
-    num_id_classes = len(IDclass)
-    y = torch.zeros((num_nodes, num_id_classes), dtype=torch.float)
-    remapped = y_raw[id_mask] - min(IDclass)
-    y[id_mask] = one_hot_encode(remapped, num_id_classes)
+    train_mask[perm[:train_end]] = True
+    val_mask[perm[train_end:val_end]] = True
+    test_mask[perm[val_end:]] = True
 
     data = Data(
         x=x,
@@ -128,12 +119,12 @@ def loader_road_direct(DATASET_STORAGE_PATH, split_ratio=(0.6,0.2,0.2), k_spatia
     )
 
     print("ROAD Graph Created")
-    print("Nodes:", num_nodes)
+    print("Nodes:", x.shape[0])
     print("Edges:", edge_index.shape[1])
-    print("Feature dim:", x.shape[1])
+    print("Num classes:", num_classes)
 
-    loader_train = DataLoader([data], batch_size=1)
-    loader_val = DataLoader([data], batch_size=1)
-    loader_test = DataLoader([data], batch_size=1)
-
-    return loader_train, loader_val, loader_test
+    return (
+        DataLoader([data], batch_size=1),
+        DataLoader([data], batch_size=1),
+        DataLoader([data], batch_size=1)
+    )
