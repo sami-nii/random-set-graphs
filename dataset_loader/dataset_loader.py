@@ -10,7 +10,7 @@ from dataset_loader.loader_roman_empire import load_roman_empire
 from dataset_loader.loader_road import loader_road
 
 
-DATASET_STORAGE_PATH = "./dataset/road-dataset-master/road"
+DATASET_STORAGE_PATH = "./dataset/"
 
 def dataset_loader(dataset_name: str, config):
     if dataset_name == 'cora':

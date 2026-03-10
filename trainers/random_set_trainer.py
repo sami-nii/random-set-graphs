@@ -66,13 +66,41 @@ def random_set_train(project_name, dataset_name, **kwargs):
     # Budget Override
     if num_id_classes >= 10:
            print("Replacing power set with budgeted focal sets")
-           aux_model = model.gnn_model(config, num_features, num_id_classes)
+           aux_model = RandomSetGNN(
+               gnn_type=config.get("gnn_type", "GCN"),
+               in_channels=num_features,
+               hidden_channels=config.get("hidden_channels", 64),
+               num_layers=config.get("num_layers", 2),
+               focal_sets=focal_sets,
+               num_classes=num_id_classes,
+               lr=config.get("lr", 0.001),
+               weight_decay=config.get("weight_decay", 1e-4),
+               alpha=config.get("alpha", 1e-3),
+               beta=config.get("beta", 1e-3)
+           ).gnn_model
            device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
            # 1. Compute embeddings
+           if data_sample.y.dim() > 1:
+               is_id = data_sample.y.sum(dim=1) == 1
+               y_indices = data_sample.y.argmax(dim=-1)
+           else:
+               is_id = torch.ones_like(data_sample.y, dtype=torch.bool)
+               y_indices = data_sample.y
+           train_mask = data_sample.train_mask.bool()
+           budget_mask = train_mask & is_id
+
            x_train = data_sample.x.to(device)
-           y_train = data_sample.y.argmax(dim=-1).to(device)
-           train_embedded = train_embeddings(aux_model, x_train, batch_size=config.get("batch_size", 256), device=device)
+           y_train = y_indices[budget_mask]
+           edge_index = data_sample.edge_index.to(device)
+           train_embedded = train_embeddings(
+               aux_model,
+               x_train,
+               batch_size=config.get("batch_size", 256),
+               device=device,
+               edge_index=edge_index
+           )
+           train_embedded = train_embedded[budget_mask.cpu()]
            
            # 2. Fit GMMs
            classes = list(range(num_id_classes))
@@ -90,6 +118,7 @@ def random_set_train(project_name, dataset_name, **kwargs):
                 means=means,
                 max_len=max_len
                 )
+           focal_sets = [set(int(c) for c in s) for s in focal_sets]
            
            print(f"Budgeted focal sets size: {len(focal_sets)}")
 

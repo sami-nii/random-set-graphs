@@ -1,27 +1,40 @@
 import torch
+import inspect
+import numpy as np
 from sklearn.manifold import TSNE
 from sklearn.mixture import GaussianMixture
 from scipy import linalg
 
-def train_embeddings(aux_model, x_train, batch_size, device='cpu'):
+def train_embeddings(aux_model, x_train, batch_size, device='cpu', edge_index=None):
     aux_model.to(device)
     x_train = x_train.to(device)
+    if edge_index is not None:
+        edge_index = edge_index.to(device)
     
     with torch.no_grad():
-        train_embeddings = aux_model(x_train).cpu().numpy()
+        if edge_index is None:
+            train_embeddings = aux_model(x_train).cpu().numpy()
+        else:
+            train_embeddings = aux_model(x_train, edge_index).cpu().numpy()
     
-    train_embedded_tsne = TSNE(n_components=3, init='random', perplexity=30, n_jobs=-1).fit_transform(train_embeddings)
+    tsne_kwargs = {"n_components": 3, "init": "random", "perplexity": 30}
+    if "n_jobs" in inspect.signature(TSNE.__init__).parameters:
+        tsne_kwargs["n_jobs"] = -1
+    train_embedded_tsne = TSNE(**tsne_kwargs).fit_transform(train_embeddings)
     return torch.tensor(train_embedded_tsne, dtype=torch.float32)
 
 
 def fit_gmm(classes, train_embedded_tsne, y_train):
     individual_gms = []
-    train_embedded_tsne_np = train_embedded_tsne.numpy()
-    y_train_np = y_train.numpy()
+    train_embedded_tsne_np = train_embedded_tsne.detach().cpu().numpy()
+    y_train_np = y_train.detach().cpu().numpy()
     
     for i in range(len(classes)):
+        class_points = train_embedded_tsne_np[y_train_np == i]
+        if class_points.shape[0] == 0:
+            raise ValueError(f"No training samples found for class {i} in budgeting GMM fit.")
         gm = GaussianMixture(n_components=1, random_state=7)
-        gm.fit(train_embedded_tsne_np[y_train_np == i])
+        gm.fit(class_points)
         individual_gms.append(gm)
     
     return individual_gms
@@ -40,18 +53,18 @@ def ellipse(individual_gms, num_classes, device='cpu'):
         stds.append(v)
         eigen_vecs.append(torch.tensor(w, dtype=torch.float32))
     
-    means = torch.tensor(means, dtype=torch.float32, device=device)
+    means = torch.from_numpy(np.asarray(means, dtype=np.float32)).to(device)
     eigen_vecs = torch.stack(eigen_vecs).to(device)
     stds = torch.stack(stds).to(device)
     
     max_std = torch.max(stds)
     max_len = int(max_std.item()) + 2
     reg_shape = (max_len,) * feature_space
-    center = torch.tensor(reg_shape, device=device) // 2
+    center = (torch.tensor(reg_shape, device=device, dtype=torch.float32) / 2.0)
     
     # Generate grid indices
     indices = torch.stack(torch.meshgrid(*[torch.arange(s, device=device) for s in reg_shape], indexing='ij'), dim=-1)
-    indices = indices.reshape(-1, feature_space)
+    indices = indices.reshape(-1, feature_space).to(torch.float32)
     
     regions = []
     vecs = indices - center
@@ -95,7 +108,8 @@ def overlaps(k, classes, num_clusters, classes_dict, regions, means, max_len):
                         smallest_region = min(smallest_region, torch.sum(reg))
                     
                     intersection = torch.sum(region == len(s)).item()
-                    op = intersection / torch.sum(region != 0).item()
+                    union = torch.sum(region != 0).item()
+                    op = 0.0 if union == 0 else intersection / union
                     overlaps_dict[s_key] = op
                     if op > 0:
                         new_top_sets.append(set(s))
