@@ -80,12 +80,14 @@ def ellipse(individual_gms, num_classes, device='cpu'):
     return regions, means, max_len
 
 
-def overlaps(k, classes, num_clusters, classes_dict, regions, means, max_len):
+def overlaps(k, classes, num_clusters, classes_dict, regions, means, max_len, max_cardinality=3):
     clusters = classes
     overlaps_dict = {}
     top_sets = [set([c]) for c in clusters]
+    max_cardinality = max(2, min(max_cardinality, num_clusters))
 
-    for cardinality in range(2, num_clusters + 1):
+    for cardinality in range(2, max_cardinality + 1):
+        print(f"  Evaluating overlap candidates of size {cardinality}...")
         new_top_sets = []
         for ts in top_sets:
             for clus in clusters:
@@ -101,8 +103,6 @@ def overlaps(k, classes, num_clusters, classes_dict, regions, means, max_len):
                             region += reg
                             reg_cen = means[c]
                         else:
-                            top_corner = means[c] - reg_cen
-                            limits = torch.stack([torch.clamp(top_corner, -max_len, max_len).int() for _ in range(2)], dim=1)
                             # simplified approximation for overlap
                             region += reg
                         smallest_region = min(smallest_region, torch.sum(reg))

@@ -170,6 +170,19 @@ class RandomSetGNN(L.LightningModule):
         beliefs = self.rs_layer(h) # Shape: [N, num_focal_sets]
         return beliefs
 
+    def _get_step_mask(self, batch, split):
+        mask = getattr(batch, f"{split}_mask")
+
+        # NeighborLoader places the seed nodes first in the sampled batch. We
+        # should compute losses/metrics on those nodes only, not on the full
+        # sampled neighborhood.
+        if hasattr(batch, "batch_size") and batch.batch_size is not None:
+            seed_mask = torch.zeros(mask.size(0), dtype=torch.bool, device=mask.device)
+            seed_mask[:batch.batch_size] = True
+            return mask & seed_mask
+
+        return mask
+
     def get_pignistic_probs(self, beliefs):
         """
         Converts predicted Beliefs -> Masses -> Pignistic Probabilities
@@ -193,7 +206,7 @@ class RandomSetGNN(L.LightningModule):
         beliefs = self(batch)
         
         # Filter masks
-        train_mask = batch.train_mask
+        train_mask = self._get_step_mask(batch, "train")
         preds = beliefs[train_mask]
         targets = batch.y[train_mask] # Assuming y is one-hot or index
         
@@ -226,7 +239,7 @@ class RandomSetGNN(L.LightningModule):
         # --- OOD Detection (Pignistic Entropy) ---
         if self.ood_in_val:
             # We evaluate Uncertainty on VAL mask (which contains ID + OOD)
-            val_mask = batch.val_mask
+            val_mask = self._get_step_mask(batch, "val")
             val_beliefs = beliefs[val_mask]
             
             # Compute Pignistic Probabilities
@@ -241,18 +254,16 @@ class RandomSetGNN(L.LightningModule):
             y_val_all = batch.y[val_mask]
             ood_targets = 1 - y_val_all.sum(dim=1).long() # 1 if OOD, 0 if ID
             
-            # AUROC of Entropy
-            try:
+            # AUROC needs both ID and OOD targets in the current batch.
+            if ood_targets.numel() > 0 and torch.unique(ood_targets).numel() > 1:
                 auroc = self.auroc_metric(entropy, ood_targets)
                 self.log("val_auroc_entropy", auroc, batch_size=val_mask.sum())
-            except:
-                pass # Skip if only one class present in batch
 
         # --- Classification Metrics (ID Only) ---
         # Identify ID nodes in validation
         y_val_full = batch.y
         is_id = (y_val_full.sum(dim=1) == 1)
-        id_val_mask = batch.val_mask & is_id
+        id_val_mask = self._get_step_mask(batch, "val") & is_id
         
         if id_val_mask.sum() > 0:
             id_beliefs = beliefs[id_val_mask]
@@ -275,7 +286,7 @@ class RandomSetGNN(L.LightningModule):
 
     def test_step(self, batch, batch_idx):
         beliefs = self(batch)
-        test_mask = batch.test_mask
+        test_mask = self._get_step_mask(batch, "test")
         
         test_beliefs = beliefs[test_mask]
         y_test = batch.y[test_mask]
@@ -288,8 +299,9 @@ class RandomSetGNN(L.LightningModule):
         entropy = -torch.sum(betp * torch.log(betp + eps), dim=1)
         
         ood_targets = 1 - y_test.sum(dim=1).long()
-        auroc = self.auroc_metric(entropy, ood_targets)
-        self.log("test_auroc_entropy", auroc)
+        if ood_targets.numel() > 0 and torch.unique(ood_targets).numel() > 1:
+            auroc = self.auroc_metric(entropy, ood_targets)
+            self.log("test_auroc_entropy", auroc)
 
         # 2. ID Classification Metrics
         is_id = (y_test.sum(dim=1) == 1)

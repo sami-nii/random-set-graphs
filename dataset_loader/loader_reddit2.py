@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import json
 import os.path as osp
+import os
 from typing import Callable, List, Optional
 import numpy as np
 
@@ -207,20 +208,59 @@ def load_reddit2(DATASET_STORAGE_PATH, config):
     # ==============================================================================
     # --- 5. Create DataLoaders (with Mini-Batching Logic) ---
     # ==============================================================================
+    requested_num_workers = int(config.get("num_workers", 11))
+    num_workers = requested_num_workers
+
+    # Windows multiprocessing is fragile on large graph workloads, so prefer
+    # single-process loading there.
+    if os.name == "nt" and num_workers > 0:
+        print(
+            f"Windows detected: overriding num_workers from {requested_num_workers} "
+            "to 0 for Reddit2 to avoid DataLoader shared-memory errors."
+        )
+        num_workers = 0
+
+    dataloader_kwargs = {
+        "num_workers": num_workers,
+        "persistent_workers": num_workers > 0,
+    }
+
     if config.get("batch_size", -1) <= 0:
         print("Using DataLoader for full-batch training.")
-        train_loader = DataLoader([data], batch_size=1, shuffle=False)
+        train_loader = DataLoader([data], batch_size=1, shuffle=False, **dataloader_kwargs)
+        val_loader = DataLoader([data], batch_size=1, shuffle=False, **dataloader_kwargs)
+        test_loader = DataLoader([data], batch_size=1, shuffle=False, **dataloader_kwargs)
     else:
-        print(f"Using NeighborLoader for mini-batch training with batch size {config['batch_size']}.")
+        batch_size = int(config["batch_size"])
+        eval_batch_size = int(config.get("eval_batch_size", batch_size))
+        num_neighbors = [int(config.get('num_neighbors', 10))] * int(config.get("num_layers", 2))
+
+        print(f"Using NeighborLoader for mini-batch training with batch size {batch_size}.")
         train_loader = NeighborLoader(
             data,
             input_nodes=data.train_mask, # Crucial: sample starting nodes from the train mask
-            batch_size=config["batch_size"],
-            num_neighbors=[int(config.get('num_neighbors', 10))] * int(config.get("num_layers", 2)),
-            shuffle=True
+            batch_size=batch_size,
+            num_neighbors=num_neighbors,
+            shuffle=True,
+            **dataloader_kwargs,
         )
 
-    val_loader = DataLoader([data], batch_size=1, shuffle=False)
-    test_loader = DataLoader([data], batch_size=1, shuffle=False)
+        print(f"Using NeighborLoader for validation/test with batch size {eval_batch_size}.")
+        val_loader = NeighborLoader(
+            data,
+            input_nodes=data.val_mask,
+            batch_size=eval_batch_size,
+            num_neighbors=num_neighbors,
+            shuffle=False,
+            **dataloader_kwargs,
+        )
+        test_loader = NeighborLoader(
+            data,
+            input_nodes=data.test_mask,
+            batch_size=eval_batch_size,
+            num_neighbors=num_neighbors,
+            shuffle=False,
+            **dataloader_kwargs,
+        )
 
     return train_loader, val_loader, test_loader

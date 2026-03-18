@@ -37,7 +37,7 @@ metadata_arxiv     = {
 metadata_reddit2   = {
     "in_channels": {"values": [602]},  
     "out_channels": {"values": [30]},
-    "batch_size": {"values": [-1]},
+    "batch_size": {"values": [256]},
     "num_neighbors": {"values": [10]},
 }
 metadata_coauthor  = {
