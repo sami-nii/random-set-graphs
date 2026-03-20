@@ -37,13 +37,14 @@ class KNN_LJ_Detector(L.LightningModule):
         all_embeddings = []
         
         # 1. Add initial node features (z^0)
-        all_embeddings.append(data.x)
+        x0 = data.x.float()
+        all_embeddings.append(x0)
 
         # 2. Manually iterate through the GNN's layers, precisely replicating its forward pass
         if not hasattr(self.backbone.gnn_model, 'convs') or not hasattr(self.backbone.gnn_model, 'act'):
             raise NotImplementedError("Backbone GNN must have 'convs' (ModuleList) and 'act' attributes.")
             
-        x = data.x
+        x = x0
         for i in range(self.backbone.gnn_model.num_layers):
             # Apply the i-th convolutional layer
             x = self.backbone.gnn_model.convs[i](x, data.edge_index)

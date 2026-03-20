@@ -55,7 +55,7 @@ class VanillaGNN(L.LightningModule):
 
     def forward(self, data):
         # The model should return raw logits
-        logits = self.gnn_model(data.x, data.edge_index)
+        logits = self.gnn_model(data.x.float(), data.edge_index)
         return logits
 
     def training_step(self, batch, batch_idx):

@@ -54,11 +54,12 @@ class GEBMModule(L.LightningModule):
     @torch.no_grad()
     def _get_joint_embeddings(self, data):
         """Concatenate embeddings from all layers of the frozen GNN backbone."""
-        all_embeddings = [data.x]
+        x0 = data.x.float()
+        all_embeddings = [x0]
         gnn = self.backbone.gnn_model
         if not hasattr(gnn, 'convs') or not hasattr(gnn, 'act'):
             raise NotImplementedError("Backbone GNN must expose 'convs' and 'act'.")
-        x = data.x
+        x = x0
         for i in range(gnn.num_layers):
             x = gnn.convs[i](x, data.edge_index)
             if i < gnn.num_layers - 1:

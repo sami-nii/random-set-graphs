@@ -53,7 +53,7 @@ class credal_GNN_t(L.LightningModule):
         self.apply(self.weights_init)
 
     def forward(self, data):
-        representation_layer = self.gnn_model(data.x, data.edge_index)
+        representation_layer = self.gnn_model(data.x.float(), data.edge_index)
         q_L, q_U = self.credal_layer_model(representation_layer)
         return q_L, q_U
 

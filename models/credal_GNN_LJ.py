@@ -69,7 +69,7 @@ class credal_GNN_LJ(L.LightningModule):
         """
         all_embeddings = []
         # The input to the first layer is the node features
-        x = data.x
+        x = data.x.float()
 
         # Manually iterate through the GNN's convolutional layers
         # This assumes the PyG model stores its layers in a `self.convs` ModuleList

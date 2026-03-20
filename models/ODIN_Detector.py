@@ -26,7 +26,7 @@ class ODINDetector(L.LightningModule):
 
     def forward(self, data): # TODO check
         # Clone input and enable gradients on x
-        x_perturbed = data.x.clone().detach().requires_grad_(True)
+        x_perturbed = data.x.float().clone().detach().requires_grad_(True)
         data_perturbed = data.clone()
         data_perturbed.x = x_perturbed
 
@@ -51,7 +51,7 @@ class ODINDetector(L.LightningModule):
         perturbation = self.noise_magnitude * gradient.sign()
 
         # Add perturbation to x
-        x_final = data.x + perturbation
+        x_final = data.x.float() + perturbation
         data_perturbed.x = x_final.detach()  # no gradient needed now
 
         # Final forward with perturbed x

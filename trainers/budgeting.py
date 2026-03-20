@@ -7,7 +7,7 @@ from scipy import linalg
 
 def train_embeddings(aux_model, x_train, batch_size, device='cpu', edge_index=None):
     aux_model.to(device)
-    x_train = x_train.to(device)
+    x_train = x_train.to(device).float()
     if edge_index is not None:
         edge_index = edge_index.to(device)
     

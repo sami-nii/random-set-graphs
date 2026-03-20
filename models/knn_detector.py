@@ -62,7 +62,7 @@ class KNNDetector(L.LightningModule):
             return logits
 
         num_layers = gnn.num_layers
-        x = data.x
+        x = data.x.float()
 
         # Only one layer -> no hidden representation; use logits
         if num_layers <= 1:

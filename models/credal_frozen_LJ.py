@@ -84,13 +84,14 @@ class CredalFrozenJoint(L.LightningModule):
         Concatenate: input features (z^0) + outputs of each backbone GNN layer.
         Backbone is frozen/eval.
         """
-        all_embeddings = [data.x]
+        x0 = data.x.float()
+        all_embeddings = [x0]
         gnn = self.backbone.gnn_model
 
         if not hasattr(gnn, "convs") or not hasattr(gnn, "act"):
             raise NotImplementedError("Backbone must expose 'convs' and 'act' attributes.")
 
-        x = data.x
+        x = x0
         for i in range(gnn.num_layers):
             x = gnn.convs[i](x, data.edge_index)
             if i < gnn.num_layers - 1:

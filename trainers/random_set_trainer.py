@@ -29,15 +29,47 @@ def random_set_train(project_name, dataset_name, **kwargs):
     # 1. Load Dataset
     # Assumes transductive setting where loaders return the same graph object
     train_loader, val_loader, test_loader = dataset_loader(dataset_name, config)
-    print(f"Number of batches per epoch: {len(train_loader)}")
-    
-    # Get metadata from the first batch
-    data_sample = next(iter(train_loader))
-    num_features = data_sample.x.shape[1]
-    
-    # Determine number of ID classes
+
+    def _get_base_data(loader):
+        if hasattr(loader, "data") and hasattr(loader.data, "x") and hasattr(loader.data, "y"):
+            return loader.data
+
+        dataset = getattr(loader, "dataset", None)
+        if dataset is not None:
+            try:
+                if len(dataset) == 1:
+                    candidate = dataset[0]
+                    if hasattr(candidate, "x") and hasattr(candidate, "y"):
+                        return candidate
+            except Exception:
+                pass
+
+        return None
+
+    base_data = _get_base_data(train_loader)
+
+    try:
+        print(f"Number of batches per epoch: {len(train_loader)}")
+    except Exception as exc:
+        print(f"Skipping batch-count precomputation: {exc}")
+
+    # Prefer reading metadata from the base graph to avoid triggering an eager
+    # sampled batch on large NeighborLoader datasets.
+    if base_data is None:
+        print("Falling back to a sampled batch to recover train-loader metadata.")
+        data_sample = next(iter(train_loader))
+        base_data = data_sample
+    else:
+        data_sample = base_data
+
+    num_features = base_data.x.shape[1]
+
     # If y is one-hot [Nodes, Classes], shape[1] is the number of classes.
-    num_id_classes = data_sample.y.shape[1]
+    if base_data.y.dim() > 1 and base_data.y.size(1) > 1:
+        num_id_classes = base_data.y.shape[1]
+    else:
+        train_mask = base_data.train_mask.bool() if hasattr(base_data, "train_mask") else torch.ones(base_data.y.size(0), dtype=torch.bool)
+        num_id_classes = int(base_data.y[train_mask].max().item()) + 1
     
     # 2. Generate Full Power Set (2^N - 1)
     # We generate all non-empty subsets of the ID classes.
@@ -210,3 +242,4 @@ def random_set_train(project_name, dataset_name, **kwargs):
     del model, trainer, train_loader, val_loader, test_loader
     gc.collect()
     torch.cuda.empty_cache()
+
