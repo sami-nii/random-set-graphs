@@ -130,7 +130,8 @@ class RandomSetGNN(L.LightningModule):
         self.train_acc = Accuracy(task="multiclass", num_classes=num_classes)
         self.train_f1 = F1Score(task="multiclass", num_classes=num_classes)
         self.val_f1 = F1Score(task="multiclass", num_classes=num_classes)
-        self.auroc_metric = AUROC(task="binary")
+        self.val_auroc_metric = AUROC(task="binary")
+        self.test_auroc_metric = AUROC(task="binary")
 
     def forward(self, data):
         h = self.gnn_model(data.x.float(), data.edge_index)
@@ -160,7 +161,31 @@ class RandomSetGNN(L.LightningModule):
         """
         masses = torch.matmul(beliefs, self.moebius_mat.t())
         masses = torch.clamp(masses, min=0.0)
-        mass_sum = masses.sum(dim=1, keepdim=True) + 1e-8
+        residual_mass = torch.clamp(1.0 - masses.sum(dim=1, keepdim=True), min=0.0)
+
+        universal_set = set(range(self.num_classes))
+        universal_index = next(
+            (i for i, focal_set in enumerate(self.focal_sets) if focal_set == universal_set),
+            None,
+        )
+        if universal_index is not None:
+            masses[:, universal_index] = masses[:, universal_index] + residual_mass.squeeze(1)
+
+        mass_sum = masses.sum(dim=1, keepdim=True)
+        zero_mass_rows = mass_sum.squeeze(1) <= 1e-8
+        if zero_mass_rows.any():
+            betp = torch.full(
+                (beliefs.size(0), self.num_classes),
+                1.0 / self.num_classes,
+                dtype=beliefs.dtype,
+                device=beliefs.device,
+            )
+            non_zero_rows = ~zero_mass_rows
+            if non_zero_rows.any():
+                normalized_masses = masses[non_zero_rows] / mass_sum[non_zero_rows]
+                betp[non_zero_rows] = torch.matmul(normalized_masses, self.pignistic_mat)
+            return betp
+
         masses = masses / mass_sum
         betp = torch.matmul(masses, self.pignistic_mat)
         return betp
@@ -212,8 +237,8 @@ class RandomSetGNN(L.LightningModule):
                 ood_targets = 1 - y_val_all.sum(dim=1).long()
 
                 if ood_targets.numel() > 0 and torch.unique(ood_targets).numel() > 1:
-                    auroc = self.auroc_metric(entropy, ood_targets)
-                    self.log("val_auroc_entropy", auroc, batch_size=val_count)
+                    self.val_auroc_metric.update(entropy, ood_targets)
+                    self.log("val_auroc_entropy", self.val_auroc_metric, on_step=False, on_epoch=True, batch_size=val_count)
 
         y_val_full = batch.y
         is_id = y_val_full.sum(dim=1) == 1
@@ -251,8 +276,8 @@ class RandomSetGNN(L.LightningModule):
 
         ood_targets = 1 - y_test.sum(dim=1).long()
         if ood_targets.numel() > 0 and torch.unique(ood_targets).numel() > 1:
-            auroc = self.auroc_metric(entropy, ood_targets)
-            self.log("test_auroc_entropy", auroc, batch_size=test_count)
+            self.test_auroc_metric.update(entropy, ood_targets)
+            self.log("test_auroc_entropy", self.test_auroc_metric, on_step=False, on_epoch=True, batch_size=test_count)
 
         is_id = y_test.sum(dim=1) == 1
         if is_id.sum() > 0:

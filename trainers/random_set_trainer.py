@@ -221,12 +221,21 @@ def random_set_train(project_name, dataset_name, **kwargs):
     )
 
     # 4. Trainer Setup
+    uses_sampled_batches = int(config.get("batch_size", -1)) > 0
+    sanity_val_steps = 0 if uses_sampled_batches else 2
+    if sanity_val_steps == 0:
+        print(
+            "Skipping Lightning sanity validation for sampled mini-batch runs "
+            "to avoid large pre-training validation passes on datasets such as Reddit2."
+        )
+
     trainer = L.Trainer(
         devices="auto",
         accelerator="auto",
         logger=wandb_logger,
         max_epochs=config.get("max_epochs", 200),
         log_every_n_steps=1,
+        num_sanity_val_steps=sanity_val_steps,
         callbacks=[
             EarlyStopping(monitor="val_loss", patience=config.get("patience", 50), mode="min")
         ]
