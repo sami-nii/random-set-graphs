@@ -1,0 +1,12 @@
+Top random-set runs by test_auroc_entropy
+
+1. dataset=chameleon run=v7j9wpx6 gnn=GAT test_auroc_entropy=0.8303 test_acc_id=0.3696 focal_strategy=full_power_set num_output_heads=7
+2. dataset=chameleon run=3g7g1bts gnn=GAT test_auroc_entropy=0.8282 test_acc_id=0.3696 focal_strategy=full_power_set num_output_heads=7
+3. dataset=chameleon run=dqic8gde gnn=GAT test_auroc_entropy=0.8279 test_acc_id=0.3696 focal_strategy=full_power_set num_output_heads=7
+4. dataset=chameleon run=mg5rq7r9 gnn=GAT test_auroc_entropy=0.8278 test_acc_id=0.3696 focal_strategy=full_power_set num_output_heads=7
+5. dataset=chameleon run=ecynj2sr gnn=GAT test_auroc_entropy=0.8278 test_acc_id=0.3696 focal_strategy=full_power_set num_output_heads=7
+6. dataset=chameleon run=ll998and gnn=GAT test_auroc_entropy=0.8277 test_acc_id=0.3696 focal_strategy=full_power_set num_output_heads=7
+7. dataset=chameleon run=rpp0iomf gnn=GAT test_auroc_entropy=0.8276 test_acc_id=0.3696 focal_strategy=full_power_set num_output_heads=7
+8. dataset=chameleon run=ix81mzbb gnn=GAT test_auroc_entropy=0.8276 test_acc_id=0.3696 focal_strategy=full_power_set num_output_heads=7
+9. dataset=chameleon run=gc0axnnb gnn=GAT test_auroc_entropy=0.8273 test_acc_id=0.3696 focal_strategy=full_power_set num_output_heads=7
+10. dataset=chameleon run=qzt8933n gnn=GAT test_auroc_entropy=0.8272 test_acc_id=0.3696 focal_strategy=full_power_set num_output_heads=7

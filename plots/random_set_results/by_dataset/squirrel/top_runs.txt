@@ -1,0 +1,12 @@
+Top random-set runs by test_auroc_entropy
+
+1. dataset=squirrel run=ujy6q506 gnn=GAT test_auroc_entropy=0.6495 test_acc_id=0.3312 focal_strategy=full_power_set num_output_heads=7
+2. dataset=squirrel run=8d35eyri gnn=GAT test_auroc_entropy=0.6494 test_acc_id=0.3730 focal_strategy=full_power_set num_output_heads=7
+3. dataset=squirrel run=09ye05ai gnn=GAT test_auroc_entropy=0.6493 test_acc_id=0.3312 focal_strategy=full_power_set num_output_heads=7
+4. dataset=squirrel run=3b2df1e0 gnn=GAT test_auroc_entropy=0.6492 test_acc_id=0.3344 focal_strategy=full_power_set num_output_heads=7
+5. dataset=squirrel run=dfnozpp5 gnn=GAT test_auroc_entropy=0.6491 test_acc_id=0.3312 focal_strategy=full_power_set num_output_heads=7
+6. dataset=squirrel run=nsnvvxqg gnn=GAT test_auroc_entropy=0.6488 test_acc_id=0.3682 focal_strategy=full_power_set num_output_heads=7
+7. dataset=squirrel run=9lybala2 gnn=GAT test_auroc_entropy=0.6488 test_acc_id=0.3312 focal_strategy=full_power_set num_output_heads=7
+8. dataset=squirrel run=60d0z9gx gnn=GAT test_auroc_entropy=0.6487 test_acc_id=0.3232 focal_strategy=full_power_set num_output_heads=7
+9. dataset=squirrel run=6949jzc3 gnn=GAT test_auroc_entropy=0.6486 test_acc_id=0.3344 focal_strategy=full_power_set num_output_heads=7
+10. dataset=squirrel run=jiqjujlp gnn=GAT test_auroc_entropy=0.6485 test_acc_id=0.3264 focal_strategy=full_power_set num_output_heads=7

@@ -1,0 +1,12 @@
+Top random-set runs by test_auroc_entropy
+
+1. dataset=patents run=u3av844t gnn=GAT test_auroc_entropy=0.5634 test_acc_id=0.3561 focal_strategy=full_power_set num_output_heads=7
+2. dataset=patents run=u3vxukuv gnn=GAT test_auroc_entropy=0.5232 test_acc_id=0.3550 focal_strategy=full_power_set num_output_heads=7
+3. dataset=patents run=46plh9fl gnn=GAT test_auroc_entropy=0.5154 test_acc_id=0.3314 focal_strategy=full_power_set num_output_heads=7
+4. dataset=patents run=gghyjd85 gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.3570 focal_strategy=full_power_set num_output_heads=7
+5. dataset=patents run=5kqtzn15 gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.3567 focal_strategy=full_power_set num_output_heads=7
+6. dataset=patents run=vcsvfeen gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.3559 focal_strategy=full_power_set num_output_heads=7
+7. dataset=patents run=e7wymow7 gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.3559 focal_strategy=full_power_set num_output_heads=7
+8. dataset=patents run=031yizvi gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.3556 focal_strategy=full_power_set num_output_heads=7
+9. dataset=patents run=2jfzedfd gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.3555 focal_strategy=full_power_set num_output_heads=7
+10. dataset=patents run=w9qv2535 gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.3548 focal_strategy=full_power_set num_output_heads=7

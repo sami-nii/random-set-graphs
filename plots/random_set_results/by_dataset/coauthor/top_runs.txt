@@ -1,0 +1,12 @@
+Top random-set runs by test_auroc_entropy
+
+1. dataset=coauthor run=k1osq6o1 gnn=GAT test_auroc_entropy=0.9181 test_acc_id=0.9244 focal_strategy=budgeted num_output_heads=43
+2. dataset=coauthor run=sq8bgdhn gnn=GAT test_auroc_entropy=0.9030 test_acc_id=0.9093 focal_strategy=budgeted num_output_heads=43
+3. dataset=coauthor run=nmlogvkd gnn=GAT test_auroc_entropy=0.8723 test_acc_id=0.9256 focal_strategy=budgeted num_output_heads=43
+4. dataset=coauthor run=0whikzri gnn=GAT test_auroc_entropy=0.8720 test_acc_id=0.8433 focal_strategy=budgeted num_output_heads=43
+5. dataset=coauthor run=wwptpz66 gnn=GAT test_auroc_entropy=0.8310 test_acc_id=0.0957 focal_strategy=budgeted num_output_heads=43
+6. dataset=coauthor run=xtiovnci gnn=GAT test_auroc_entropy=0.6797 test_acc_id=0.4637 focal_strategy=budgeted num_output_heads=43
+7. dataset=coauthor run=x0479brp gnn=GAT test_auroc_entropy=0.6784 test_acc_id=0.8026 focal_strategy=budgeted num_output_heads=43
+8. dataset=coauthor run=dpowdzo1 gnn=GAT test_auroc_entropy=0.6662 test_acc_id=0.4658 focal_strategy=budgeted num_output_heads=43
+9. dataset=coauthor run=abarqq15 gnn=GAT test_auroc_entropy=0.6580 test_acc_id=0.4358 focal_strategy=budgeted num_output_heads=43
+10. dataset=coauthor run=v6vb8hcz gnn=GAT test_auroc_entropy=0.6546 test_acc_id=0.4375 focal_strategy=budgeted num_output_heads=43

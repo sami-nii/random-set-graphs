@@ -1,0 +1,12 @@
+Top random-set runs by test_auroc_entropy
+
+1. dataset=amazon_ratings run=2c4iemjv gnn=GAT test_auroc_entropy=0.5149 test_acc_id=0.6363 focal_strategy=full_power_set num_output_heads=7
+2. dataset=amazon_ratings run=5zcb8jev gnn=GAT test_auroc_entropy=0.5121 test_acc_id=0.6363 focal_strategy=full_power_set num_output_heads=7
+3. dataset=amazon_ratings run=u06dcvs5 gnn=GAT test_auroc_entropy=0.5015 test_acc_id=0.6363 focal_strategy=full_power_set num_output_heads=7
+4. dataset=amazon_ratings run=x1mbqpmh gnn=GAT test_auroc_entropy=0.5014 test_acc_id=0.6363 focal_strategy=full_power_set num_output_heads=7
+5. dataset=amazon_ratings run=u7xih842 gnn=GAT test_auroc_entropy=0.5008 test_acc_id=0.6363 focal_strategy=full_power_set num_output_heads=7
+6. dataset=amazon_ratings run=jf49qv4j gnn=GAT test_auroc_entropy=0.5002 test_acc_id=0.6363 focal_strategy=full_power_set num_output_heads=7
+7. dataset=amazon_ratings run=d30arxxu gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.6363 focal_strategy=full_power_set num_output_heads=7
+8. dataset=amazon_ratings run=9nw4f5vw gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.6363 focal_strategy=full_power_set num_output_heads=7
+9. dataset=amazon_ratings run=gbl0i2br gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.6363 focal_strategy=full_power_set num_output_heads=7
+10. dataset=amazon_ratings run=pej24kt4 gnn=GAT test_auroc_entropy=0.5000 test_acc_id=0.6363 focal_strategy=full_power_set num_output_heads=7
