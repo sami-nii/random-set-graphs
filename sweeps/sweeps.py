@@ -237,6 +237,79 @@ sweep_random_set = {
         "hidden_channels": {"values": [64, 128, 256]},
         "num_layers": {"values": [2, 3]},
         "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
+        "singletons_only": {"values": [False]},
+        "loss_ablation": {"values": ["full"]},
+        "use_bce_loss": {"values": [True]},
+        "use_mr_loss": {"values": [True]},
+        "use_ms_loss": {"values": [True]},
+    },
+}
+
+
+def _clone_random_set_sweep(**parameter_overrides):
+    sweep = {
+        "method": sweep_random_set["method"],
+        "metric": dict(sweep_random_set["metric"]),
+        "parameters": {
+            key: dict(value) for key, value in sweep_random_set["parameters"].items()
+        },
+    }
+    for key, value in parameter_overrides.items():
+        sweep["parameters"][key] = value
+    return sweep
+
+
+sweep_random_set_ablation_singletons_only = _clone_random_set_sweep(
+    singletons_only={"values": [True]},
+    loss_ablation={"values": ["full"]},
+)
+
+sweep_random_set_ablation_bce_only = _clone_random_set_sweep(
+    singletons_only={"values": [False]},
+    loss_ablation={"values": ["bce_only"]},
+    use_bce_loss={"values": [True]},
+    use_mr_loss={"values": [False]},
+    use_ms_loss={"values": [False]},
+)
+
+sweep_random_set_ablation_bce_mr = _clone_random_set_sweep(
+    singletons_only={"values": [False]},
+    loss_ablation={"values": ["bce_mr"]},
+    use_bce_loss={"values": [True]},
+    use_mr_loss={"values": [True]},
+    use_ms_loss={"values": [False]},
+)
+
+sweep_random_set_ablation_bce_ms = _clone_random_set_sweep(
+    singletons_only={"values": [False]},
+    loss_ablation={"values": ["bce_ms"]},
+    use_bce_loss={"values": [True]},
+    use_mr_loss={"values": [False]},
+    use_ms_loss={"values": [True]},
+)
+
+sweep_random_set_ablation_singletons_bce_only = _clone_random_set_sweep(
+    singletons_only={"values": [True]},
+    loss_ablation={"values": ["bce_only"]},
+    use_bce_loss={"values": [True]},
+    use_mr_loss={"values": [False]},
+    use_ms_loss={"values": [False]},
+)
+
+sweep_random_set_ablation_focal_and_loss_grid = {
+    "method": "grid",
+    "metric": {"name": "val_auroc_entropy", "goal": "maximize"},
+    "parameters": {
+        "gnn_type": {"values": ["GAT"]},
+        "lr": {"values": [1e-3, 1e-2]},
+        "hidden_channels": {"values": [64, 128]},
+        "num_layers": {"values": [2, 3]},
+        "weight_decay": {"values": [1e-4, 1e-2]},
+        "singletons_only": {"values": [False, True]},
+        "loss_ablation": {"values": ["full", "bce_only", "bce_mr", "bce_ms"]},
+        "use_bce_loss": {"values": [True]},
+        "use_mr_loss": {"values": [True]},
+        "use_ms_loss": {"values": [True]},
     },
 }
 

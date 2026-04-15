@@ -47,12 +47,24 @@ class RandomSetLayer(nn.Module):
 
 
 class RandomSetLoss(nn.Module):
-    def __init__(self, focal_sets, moebius_mat, alpha=1e-3, beta=1e-3):
+    def __init__(
+        self,
+        focal_sets,
+        moebius_mat,
+        alpha=1e-3,
+        beta=1e-3,
+        use_bce=True,
+        use_mr=True,
+        use_ms=True,
+    ):
         super().__init__()
         self.focal_sets = focal_sets
         self.register_buffer("moebius_mat", moebius_mat)
         self.alpha = alpha
         self.beta = beta
+        self.use_bce = use_bce
+        self.use_mr = use_mr
+        self.use_ms = use_ms
 
     def forward(self, pred_beliefs, target_indices):
         """
@@ -73,7 +85,14 @@ class RandomSetLoss(nn.Module):
         mr_loss = torch.relu(-masses).mean()
         ms_loss = torch.abs(masses.sum(dim=1) - 1.0).mean()
 
-        total_loss = bce_loss + (self.alpha * mr_loss) + (self.beta * ms_loss)
+        total_loss = torch.zeros((), device=pred_beliefs.device, dtype=pred_beliefs.dtype)
+        if self.use_bce:
+            total_loss = total_loss + bce_loss
+        if self.use_mr:
+            total_loss = total_loss + (self.alpha * mr_loss)
+        if self.use_ms:
+            total_loss = total_loss + (self.beta * ms_loss)
+
         return total_loss, bce_loss, mr_loss, ms_loss
 
 
@@ -99,6 +118,10 @@ class RandomSetGNN(L.LightningModule):
         weight_decay: float = 0.0,
         alpha: float = 1e-3,
         beta: float = 1e-3,
+        loss_ablation: str = "full",
+        use_bce_loss: bool = True,
+        use_mr_loss: bool = True,
+        use_ms_loss: bool = True,
         ood_in_val: bool = True,
         **kwargs,
     ):
@@ -125,7 +148,15 @@ class RandomSetGNN(L.LightningModule):
         )
 
         self.rs_layer = RandomSetLayer(hidden_channels, len(focal_sets))
-        self.criterion = RandomSetLoss(focal_sets, moebius_mat, alpha, beta)
+        self.criterion = RandomSetLoss(
+            focal_sets,
+            moebius_mat,
+            alpha,
+            beta,
+            use_bce=use_bce_loss,
+            use_mr=use_mr_loss,
+            use_ms=use_ms_loss,
+        )
 
         self.train_acc = Accuracy(task="multiclass", num_classes=num_classes)
         self.train_f1 = F1Score(task="multiclass", num_classes=num_classes)
@@ -217,6 +248,7 @@ class RandomSetGNN(L.LightningModule):
         self.log("train_loss", loss, batch_size=num_train)
         self.log("train_bce", bce, batch_size=num_train)
         self.log("train_mr", mr, batch_size=num_train)
+        self.log("train_ms", ms, batch_size=num_train)
         self.log("train_acc", acc, batch_size=num_train)
 
         return loss

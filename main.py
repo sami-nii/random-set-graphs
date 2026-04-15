@@ -30,6 +30,13 @@ def main():
     )
 
     parser.add_argument(
+        "--sweep_name",
+        type=str,
+        default="",
+        help="Optional sweep object name from sweeps.sweeps, e.g. sweep_random_set_ablation_bce_only.",
+    )
+
+    parser.add_argument(
         "-m",
         "--model",
         type=str,
@@ -64,7 +71,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        sweep_model_name = f"sweep_{args.model}"
+        sweep_model_name = args.sweep_name or f"sweep_{args.model}"
         sweep_dataset_name = f"metadata_{args.dataset}"
         sweeps_module = importlib.import_module("sweeps.sweeps")
         sweep_model = getattr(sweeps_module, sweep_model_name)

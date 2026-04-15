@@ -17,6 +17,33 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models.random_set_gnn import RandomSetGNN
 from dataset_loader.dataset_loader import dataset_loader
 
+
+def _resolve_loss_ablation(config):
+    loss_ablation = str(config.get("loss_ablation", "full")).lower()
+    presets = {
+        "full": (True, True, True),
+        "bce_only": (True, False, False),
+        "bce_mr": (True, True, False),
+        "bce_ms": (True, False, True),
+        "mr_ms": (False, True, True),
+    }
+    if loss_ablation not in presets:
+        raise ValueError(
+            "Unsupported loss_ablation value "
+            f"'{loss_ablation}'. Expected one of: {sorted(presets)}"
+        )
+
+    use_bce_loss, use_mr_loss, use_ms_loss = presets[loss_ablation]
+    use_bce_loss = bool(config.get("use_bce_loss", use_bce_loss))
+    use_mr_loss = bool(config.get("use_mr_loss", use_mr_loss))
+    use_ms_loss = bool(config.get("use_ms_loss", use_ms_loss))
+
+    if not any((use_bce_loss, use_mr_loss, use_ms_loss)):
+        raise ValueError("At least one random-set loss component must be enabled.")
+
+    return loss_ablation, use_bce_loss, use_mr_loss, use_ms_loss
+
+
 def random_set_train(project_name, dataset_name, **kwargs):
     
     # Initialize WandB
@@ -79,11 +106,21 @@ def random_set_train(project_name, dataset_name, **kwargs):
 
     # 2. (edited) Generate Focal Sets (Power Set OR Budgeted)
     class_indices = list(range(num_id_classes))
+    singletons_only = bool(config.get("singletons_only", False))
+    loss_ablation, use_bce_loss, use_mr_loss, use_ms_loss = _resolve_loss_ablation(config)
 
     print(f"--- RS-NN Configuration ---")
     print(f"Number of ID Classes: {num_id_classes}")
+    print(
+        "Loss Ablation: "
+        f"{loss_ablation} (BCE={use_bce_loss}, MR={use_mr_loss}, MS={use_ms_loss})"
+    )
 
-    if num_id_classes >= 10:
+    if singletons_only:
+        focal_sets = [{c} for c in class_indices]
+        print("Focal Sets Strategy: Singletons Only")
+        print(f"Total Output Heads: {len(focal_sets)}")
+    elif num_id_classes >= 10:
         print(
             f"Skipping full power set construction for {num_id_classes} ID classes; "
             "using budgeted focal sets instead."
@@ -102,7 +139,7 @@ def random_set_train(project_name, dataset_name, **kwargs):
 
     
     # Budget Override
-    if num_id_classes >= 10:
+    if (not singletons_only) and num_id_classes >= 10:
            print("Constructing budgeted focal sets")
            aux_model = RandomSetGNN(
                gnn_type=config.get("gnn_type", "GCN"),
@@ -114,7 +151,11 @@ def random_set_train(project_name, dataset_name, **kwargs):
                lr=config.get("lr", 0.001),
                weight_decay=config.get("weight_decay", 1e-4),
                alpha=config.get("alpha", 1e-3),
-               beta=config.get("beta", 1e-3)
+               beta=config.get("beta", 1e-3),
+               loss_ablation=loss_ablation,
+               use_bce_loss=use_bce_loss,
+               use_mr_loss=use_mr_loss,
+               use_ms_loss=use_ms_loss,
            ).gnn_model
            device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -217,7 +258,11 @@ def random_set_train(project_name, dataset_name, **kwargs):
         lr=config.get("lr", 0.001),
         weight_decay=config.get("weight_decay", 1e-4),
         alpha=config.get("alpha", 1e-3),
-        beta=config.get("beta", 1e-3)
+        beta=config.get("beta", 1e-3),
+        loss_ablation=loss_ablation,
+        use_bce_loss=use_bce_loss,
+        use_mr_loss=use_mr_loss,
+        use_ms_loss=use_ms_loss,
     )
 
     # 4. Trainer Setup

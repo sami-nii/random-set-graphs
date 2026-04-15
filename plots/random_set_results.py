@@ -81,6 +81,19 @@ def _extract_focal_metadata(text: str) -> Dict[str, Optional[object]]:
     return metadata
 
 
+def _normalize_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() == "true"
+
+
+def _build_ablation_label(singletons_only: bool, loss_ablation: str) -> str:
+    focal_label = "singletons_only" if singletons_only else "standard_focal_sets"
+    return f"{focal_label}__{loss_ablation}"
+
+
 def _safe_float(value) -> Optional[float]:
     if value is None:
         return None
@@ -132,9 +145,15 @@ def load_random_set_runs(wandb_dir: Path) -> List[Dict[str, object]]:
             "lr": _extract_value_from_config(config_text, "lr"),
             "weight_decay": _extract_value_from_config(config_text, "weight_decay"),
             "batch_size": _extract_value_from_config(config_text, "batch_size"),
+            "singletons_only": _normalize_bool(_extract_value_from_config(config_text, "singletons_only")),
+            "loss_ablation": _extract_value_from_config(config_text, "loss_ablation") or "full",
+            "use_bce_loss": _normalize_bool(_extract_value_from_config(config_text, "use_bce_loss")),
+            "use_mr_loss": _normalize_bool(_extract_value_from_config(config_text, "use_mr_loss")),
+            "use_ms_loss": _normalize_bool(_extract_value_from_config(config_text, "use_ms_loss")),
             "train_loss": _safe_float(summary.get("train_loss")),
             "train_bce": _safe_float(summary.get("train_bce")),
             "train_mr": _safe_float(summary.get("train_mr")),
+            "train_ms": _safe_float(summary.get("train_ms")),
             "train_acc": _safe_float(summary.get("train_acc")),
             "val_loss": _safe_float(summary.get("val_loss")),
             "val_f1": _safe_float(summary.get("val_f1")),
@@ -144,6 +163,10 @@ def load_random_set_runs(wandb_dir: Path) -> List[Dict[str, object]]:
             "epoch": _safe_float(summary.get("epoch")),
         }
         run.update(focal_metadata)
+        run["ablation_group"] = _build_ablation_label(
+            bool(run["singletons_only"]),
+            str(run["loss_ablation"]),
+        )
         runs.append(run)
 
     return runs
@@ -172,6 +195,13 @@ def _group_by_dataset(rows: List[Dict[str, object]]) -> Dict[str, List[Dict[str,
     grouped: Dict[str, List[Dict[str, object]]] = {}
     for row in rows:
         grouped.setdefault(str(row["dataset"]), []).append(row)
+    return grouped
+
+
+def _group_by_ablation(rows: List[Dict[str, object]]) -> Dict[str, List[Dict[str, object]]]:
+    grouped: Dict[str, List[Dict[str, object]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["ablation_group"]), []).append(row)
     return grouped
 
 
@@ -211,6 +241,101 @@ def plot_tradeoff_scatter(rows: List[Dict[str, object]], output_path: Path) -> N
     ax.set_ylabel("Test AUROC from Entropy")
     ax.grid(alpha=0.25)
     ax.legend(frameon=False)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=220)
+    plt.close(fig)
+
+
+def plot_ablation_tradeoff(rows: List[Dict[str, object]], output_path: Path) -> None:
+    valid_rows = [row for row in rows if row.get("test_acc_id") is not None and row.get("test_auroc_entropy") is not None]
+    if not valid_rows:
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    cmap = plt.get_cmap("tab10")
+    grouped = _group_by_ablation(valid_rows)
+
+    for idx, (ablation, ablation_rows) in enumerate(sorted(grouped.items())):
+        xs = [row["test_acc_id"] for row in ablation_rows]
+        ys = [row["test_auroc_entropy"] for row in ablation_rows]
+        ax.scatter(
+            xs,
+            ys,
+            alpha=0.7,
+            color=cmap(idx % 10),
+            label=ablation,
+            edgecolors="black",
+            linewidths=0.3,
+        )
+
+    ax.set_title("Random-Set Ablation Tradeoff: ID Accuracy vs OOD AUROC")
+    ax.set_xlabel("Test Accuracy on ID Nodes")
+    ax.set_ylabel("Test AUROC from Entropy")
+    ax.grid(alpha=0.25)
+    ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=220)
+    plt.close(fig)
+
+
+def plot_ablation_distribution(rows: List[Dict[str, object]], output_path: Path) -> None:
+    grouped = _group_by_ablation(rows)
+    labels = []
+    values = []
+
+    for ablation, ablation_rows in sorted(grouped.items()):
+        scores = [row["test_auroc_entropy"] for row in ablation_rows if row["test_auroc_entropy"] is not None]
+        if scores:
+            labels.append(ablation)
+            values.append(scores)
+
+    if not values:
+        return
+
+    fig, ax = plt.subplots(figsize=(11, 5))
+    box = ax.boxplot(values, patch_artist=True, tick_labels=labels)
+    palette = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2"]
+    for idx, patch in enumerate(box["boxes"]):
+        patch.set_facecolor(palette[idx % len(palette)])
+        patch.set_alpha(0.85)
+
+    ax.set_ylabel("Test AUROC from Entropy")
+    ax.set_title("Random-Set AUROC Distribution by Ablation")
+    ax.tick_params(axis="x", rotation=20)
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=220)
+    plt.close(fig)
+
+
+def plot_best_per_ablation(rows: List[Dict[str, object]], output_path: Path) -> None:
+    grouped = _group_by_ablation(rows)
+    best_rows = []
+    for ablation, ablation_rows in sorted(grouped.items()):
+        valid_rows = [row for row in ablation_rows if row.get("test_auroc_entropy") is not None]
+        if not valid_rows:
+            continue
+        best_rows.append(max(valid_rows, key=lambda r: (r["test_auroc_entropy"], r.get("test_acc_id") or -1)))
+
+    if not best_rows:
+        return
+
+    labels = [row["ablation_group"] for row in best_rows]
+    aurocs = [row["test_auroc_entropy"] for row in best_rows]
+    accs = [row["test_acc_id"] or 0.0 for row in best_rows]
+
+    fig, ax = plt.subplots(figsize=(11, 5))
+    x = list(range(len(best_rows)))
+    width = 0.38
+    ax.bar([i - width / 2 for i in x], aurocs, width=width, label="Best Test AUROC", color="#355070")
+    ax.bar([i + width / 2 for i in x], accs, width=width, label="Matching Test ID Accuracy", color="#e56b6f")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=20, ha="right")
+    ax.set_ylim(0.0, 1.0)
+    ax.set_ylabel("Score")
+    ax.set_title("Best Random-Set Result Per Ablation")
+    ax.legend(frameon=False)
+    ax.grid(axis="y", alpha=0.25)
     fig.tight_layout()
     fig.savefig(output_path, dpi=220)
     plt.close(fig)
@@ -412,6 +537,24 @@ def write_top_runs_report(rows: List[Dict[str, object]], output_path: Path, top_
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def write_ablation_report(rows: List[Dict[str, object]], output_path: Path) -> None:
+    grouped = _group_by_ablation(rows)
+    lines = ["Random-set ablation summary", ""]
+    for ablation, ablation_rows in sorted(grouped.items()):
+        valid_rows = [row for row in ablation_rows if row.get("test_auroc_entropy") is not None]
+        if not valid_rows:
+            continue
+        best_row = max(valid_rows, key=lambda r: (r["test_auroc_entropy"], r.get("test_acc_id") or -1))
+        mean_auroc = sum(row["test_auroc_entropy"] for row in valid_rows) / len(valid_rows)
+        mean_acc = sum((row.get("test_acc_id") or 0.0) for row in valid_rows) / len(valid_rows)
+        lines.append(
+            f"{ablation}: runs={len(ablation_rows)} valid={len(valid_rows)} "
+            f"best_auroc={best_row['test_auroc_entropy']:.4f} "
+            f"mean_auroc={mean_auroc:.4f} mean_acc={mean_acc:.4f}"
+        )
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def generate_dataset_bundle(dataset: str, rows: List[Dict[str, object]], output_dir: Path, top_k: int) -> None:
     dataset_dir = output_dir / _slugify(dataset)
     dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -422,6 +565,18 @@ def generate_dataset_bundle(dataset: str, rows: List[Dict[str, object]], output_
     plot_focal_set_size(rows, dataset_dir / "focal_set_size_vs_auroc.png")
     plot_metric_bars(rows, dataset_dir / "top_run_bars.png")
     plot_learning_diagnostics(rows, dataset_dir / "learning_diagnostics.png")
+
+
+def generate_ablation_bundle(ablation: str, rows: List[Dict[str, object]], output_dir: Path, top_k: int) -> None:
+    ablation_dir = output_dir / _slugify(ablation)
+    ablation_dir.mkdir(parents=True, exist_ok=True)
+
+    write_csv(rows, ablation_dir / "runs.csv")
+    write_top_runs_report(rows, ablation_dir / "top_runs.txt", top_k)
+    plot_tradeoff_scatter(rows, ablation_dir / "tradeoff_scatter.png")
+    plot_focal_set_size(rows, ablation_dir / "focal_set_size_vs_auroc.png")
+    plot_metric_bars(rows, ablation_dir / "top_run_bars.png")
+    plot_learning_diagnostics(rows, ablation_dir / "learning_diagnostics.png")
 
 
 def main() -> None:
@@ -443,17 +598,26 @@ def main() -> None:
 
     write_csv(rows, args.output_dir / "random_set_runs.csv")
     write_top_runs_report(rows, args.output_dir / "top_runs.txt", args.top_k)
+    write_ablation_report(rows, args.output_dir / "ablation_summary.txt")
     plot_tradeoff_scatter(rows, args.output_dir / "tradeoff_scatter.png")
     plot_best_per_dataset(rows, args.output_dir / "best_per_dataset.png")
     plot_dataset_distributions(rows, args.output_dir / "dataset_auroc_distribution.png")
     plot_focal_set_size(rows, args.output_dir / "focal_set_size_vs_auroc.png")
     plot_metric_bars(rows, args.output_dir / "top_run_bars.png")
     plot_learning_diagnostics(rows, args.output_dir / "learning_diagnostics.png")
+    plot_ablation_tradeoff(rows, args.output_dir / "ablation_tradeoff_scatter.png")
+    plot_ablation_distribution(rows, args.output_dir / "ablation_auroc_distribution.png")
+    plot_best_per_ablation(rows, args.output_dir / "best_per_ablation.png")
 
     per_dataset_dir = args.output_dir / "by_dataset"
     per_dataset_dir.mkdir(parents=True, exist_ok=True)
     for dataset, dataset_rows in sorted(_group_by_dataset(rows).items()):
         generate_dataset_bundle(dataset, dataset_rows, per_dataset_dir, args.top_k)
+
+    per_ablation_dir = args.output_dir / "by_ablation"
+    per_ablation_dir.mkdir(parents=True, exist_ok=True)
+    for ablation, ablation_rows in sorted(_group_by_ablation(rows).items()):
+        generate_ablation_bundle(ablation, ablation_rows, per_ablation_dir, args.top_k)
 
     print(f"Saved random-set plots to: {args.output_dir}")
 
