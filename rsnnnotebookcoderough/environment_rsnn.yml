@@ -73,4 +73,3 @@ dependencies:
       - umap-learn==0.5.6
       - wandb==0.17.4
       - werkzeug==3.0.0
-prefix: /home/shireen/miniconda3/envs/myenv
