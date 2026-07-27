@@ -131,10 +131,40 @@ The RS-GNN sweep configuration is defined in `sweeps/sweeps.py` as `sweep_random
 - `hidden_channels`: hidden representation size
 - `num_layers`: number of message-passing layers
 - `singletons_only`: whether to restrict focal sets to singleton classes
+- `time_focal_set_budget`: when `true`, time budgeted focal-set construction and log
+  `focal_set_budget_seconds` to WandB (disabled by default)
+- `isotonic_calibration`: after training, fit one-vs-rest isotonic calibration on
+  labelled validation ID nodes and evaluate its effect on test probabilities
 - `loss_ablation`: one of `full`, `bce_only`, `bce_mr`, `bce_ms`, `mr_ms`
 - `use_bce_loss`, `use_mr_loss`, `use_ms_loss`: enable or disable RS-GNN loss components
 
 For datasets with many ID classes, the trainer constructs a budgeted focal-set family using learned embedding overlap statistics rather than enumerating the full power set.
+Use `sweep_random_set_ablation_budget_timing` to enable this timer in a sweep.
+
+### ROAD road-scene graph
+
+The ROAD loader constructs an object-action graph from
+`road_trainval_v1.0.json`: nodes are annotated road agents, features are
+normalised bounding-box centre/size, and edges connect consecutive observations
+of the same track and spatial neighbours in each frame. By default it uses the
+three most frequent action labels as ID classes and retains all other action
+classes as unlabeled OOD nodes. The deterministic default uses 20,000 sampled
+nodes so full-batch CPU runs remain practical; set `road_max_nodes` to `0` to
+construct the full graph, or provide `road_id_classes` to select explicit ROAD
+action-label indices. Test runs log `test_ece_id` in addition to ID accuracy
+and OOD metrics.
+
+### nuScenes object graph
+
+The optional nuScenes loader reads the extracted `v1.0-trainval` release from
+`nuscenes_root` (default: `S:\\nuScenes\\v1.0-trainval`). It constructs an
+exploratory object-category graph with object translation, size, and LiDAR/radar
+counts as features; temporal instance links and same-sample spatial-neighbour
+links as edges; and whole-scene train/validation/test splits. Its approximately
+20,000-node default budget is deterministic and can be changed with
+`nuscenes_max_nodes`; whole scenes are retained to preserve graph structure.
+This is not the official nuScenes detection benchmark and should be described
+as an exploratory graph-classification protocol.
 
 ## Outputs
 
@@ -149,6 +179,78 @@ Generated result summaries and figures are stored under:
 ```text
 plots/random_set_results/
 ```
+
+Refresh the mean and sample-standard-deviation tables after each batch of runs with:
+
+```bash
+python plots/random_set_results.py --summary-only
+```
+
+This writes `aggregate_results.md` (a readable table) and `aggregate_results.csv`
+(numeric columns) to `plots/random_set_results/`. Rows are separated by dataset,
+focal-set strategy, and loss ablation so unlike experiments are not combined.
+
+### Post-hoc isotonic calibration
+
+To evaluate RS-GNN followed by isotonic calibration, run the same RS-GNN sweep
+with the calibration switch enabled:
+
+```bash
+python main.py --dataset coauthor --model random_set --sweep_name sweep_random_set_isotonic_calibration --count 3
+```
+
+The calibrator is fitted after training using labelled in-distribution validation
+nodes only. WandB records ID NLL/ECE and entropy-OOD AUROC before and after
+calibration; `plots/random_set_results.py --summary-only` aggregates these metrics.
+
+### Focal-set budget K ablation
+
+To benchmark the one-time focal-set budget calculation without training a model,
+run the isolated K ablation (for a dataset with at least 10 ID classes):
+
+```bash
+python experiments/benchmark_focal_set_budget.py --dataset roman_empire --k-values 4 8 16 32 64 --repetitions 3
+```
+
+It writes Markdown and CSV tables under `plots/random_set_results/`. The expensive
+embedding, GMM, and ellipsoid stages run once; each K is then measured three times
+for the overlap-selection stage.
+
+To run the Task 3 K ablation for the included budgeted datasets sequentially:
+
+```powershell
+.\run_task_3.ps1
+```
+
+Refresh the aggregate full-construction timings logged by Task 1 experiments with:
+
+```bash
+python experiments/summarize_focal_set_budget_runs.py
+```
+
+
+### Post-hoc baseline overhead
+
+Measure the computation added by Energy, kNN, Mahalanobis, and ODIN relative to
+the same frozen vanilla GNN checkpoint:
+
+```bash
+python experiments/benchmark_baseline_overhead.py --dataset roman_empire --repetitions 3
+```
+
+The benchmark finds the best local vanilla checkpoint by default; pass
+`--checkpoint path/to/model.ckpt` to select one explicitly. It writes
+`baseline_overhead.md` and `baseline_overhead.csv` under
+`plots/random_set_results/`, with one-time setup cost and per-forward overhead.
+
+To train three fixed-configuration vanilla GNNs (seeds 0, 1, and 2) and then
+aggregate each post-hoc method's overhead across their checkpoints, run:
+
+```powershell
+.\run_vanilla_overhead_benchmark.ps1
+```
+
+The script runs sequentially and writes one pair of tables per dataset.
 
 ## Docker
 

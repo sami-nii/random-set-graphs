@@ -1,0 +1,6 @@
+dataset,k,repetitions,num_focal_sets,setup_seconds,overlap_mean_seconds,overlap_std_seconds,estimated_total_seconds
+roman_empire,4,3,17,20.211539,3.026299,0.055103,23.237838
+roman_empire,8,3,21,20.211539,3.035025,0.007441,23.246564
+roman_empire,16,3,29,20.211539,3.03978,0.017514,23.251319
+roman_empire,32,3,45,20.211539,3.083167,0.057734,23.294706
+roman_empire,64,3,77,20.211539,3.103721,0.027014,23.31526

@@ -1,0 +1,6 @@
+dataset,k,repetitions,num_focal_sets,setup_seconds,overlap_mean_seconds,overlap_std_seconds,estimated_total_seconds
+reddit2,4,3,34,36.83562,5.921356,0.024109,42.756976
+reddit2,8,3,38,36.83562,5.83908,0.079591,42.6747
+reddit2,16,3,46,36.83562,5.868911,0.023639,42.704531
+reddit2,32,3,62,36.83562,5.868952,0.06048,42.704572
+reddit2,64,3,94,36.83562,6.151802,0.24327,42.987422

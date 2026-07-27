@@ -16,7 +16,7 @@ def main():
         "-d",
         "--dataset",
         type=str,
-        choices=["chameleon", "patents", "arxiv", "reddit2", "coauthor", "squirrel", "amazon_ratings", "cora", "roman_empire", "road"],
+        choices=["chameleon", "patents", "arxiv", "reddit2", "coauthor", "squirrel", "amazon_ratings", "cora", "roman_empire", "road", "nuscenes"],
         default="squirrel",
         help="Dataset to run the sweep on.",
     )

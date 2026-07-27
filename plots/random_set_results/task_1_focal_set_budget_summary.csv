@@ -1,0 +1,10 @@
+dataset,focal_strategy,status,exclusion_reason,budget_k,repetitions,num_focal_sets,mean_seconds,std_seconds
+amazon_ratings,full_power_set,not_applicable,Not applicable: 3 ID classes use the full power set.,,3,,,
+arxiv,full_power_set,not_applicable,Not applicable: 3 ID classes use the full power set.,,6,,,
+chameleon,full_power_set,not_applicable,Not applicable: 3 ID classes use the full power set.,,3,,,
+coauthor,budgeted,complete,,32,3,43,18.822667,2.079929
+cora,full_power_set,not_applicable,Not applicable: 3 ID classes use the full power set.,,3,,,
+patents,full_power_set,not_applicable,Not applicable: 3 ID classes use the full power set.,,2,,,
+reddit2,budgeted,complete,,32,3,62,39.233333,1.70625
+roman_empire,budgeted,complete,,32,6,45,21.676333,3.446603
+squirrel,full_power_set,not_applicable,Not applicable: 3 ID classes use the full power set.,,3,,,

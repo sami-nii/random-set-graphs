@@ -17,6 +17,9 @@ def vanilla_train(project_name, dataset_name, save_path):
     wandb.init(project=project_name)
 
     config = wandb.config
+    seed = int(config.get("seed", 0))
+    L.seed_everything(seed, workers=True)
+    print(f"Using random seed: {seed}")
 
     wandb_logger = WandbLogger(project=project_name)
 

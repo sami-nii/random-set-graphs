@@ -7,6 +7,7 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from torchmetrics import Accuracy, F1Score, AUROC 
+from utils.isotonic_calibration import expected_calibration_error
 
 models_map = {
     "GCN": GCN, "SAGE": GraphSAGE, "GAT": GAT, "GIN": GIN, "EdgeCNN": EdgeCNN
@@ -74,7 +75,7 @@ class VanillaGNN(L.LightningModule):
         accuracy = self.accuracy_metric(preds, target)
         f1 = self.f1_metric(preds, target)
         
-        num_train_nodes = batch.train_mask.sum()
+        num_train_nodes = int(batch.train_mask.sum().item())
         self.log("train_loss", loss, batch_size=num_train_nodes)
         self.log("train_acc", accuracy, batch_size=num_train_nodes)
         self.log("train_f1", f1, batch_size=num_train_nodes)
@@ -86,6 +87,7 @@ class VanillaGNN(L.LightningModule):
         # Get all predictions and labels for the validation set
         logits_val = logits[batch.val_mask].detach()
         y_val = batch.y[batch.val_mask].detach()
+        num_val_nodes = int(batch.val_mask.sum().item())
 
         # OOD Detection using Maximum Softmax Probability (MSP)
         if self.ood_in_val:
@@ -95,23 +97,24 @@ class VanillaGNN(L.LightningModule):
             
             ood_targets = 1 - y_val.sum(axis=1)
             val_auroc = self.auroc_metric(ood_scores, ood_targets)
-            self.log("val_auroc", val_auroc, prog_bar=True)
+            self.log("val_auroc", val_auroc, prog_bar=True, batch_size=num_val_nodes)
 
         # Classification Metrics on ID nodes within the validation set
         id_mask_in_val = (y_val.sum(axis=1) == 1)
         
         id_logits = logits_val[id_mask_in_val]
         id_labels = torch.argmax(y_val[id_mask_in_val], dim=1)
+        num_id_val_nodes = int(id_mask_in_val.sum().item())
         
         loss = self.criterion(id_logits, id_labels)
-        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_loss", loss, prog_bar=True, batch_size=num_id_val_nodes)
         
         id_preds = torch.argmax(id_logits, dim=1)
         val_acc = self.accuracy_metric(id_preds, id_labels)
         val_f1 = self.f1_metric(id_preds, id_labels)
         
-        self.log("val_acc", val_acc)
-        self.log("val_f1", val_f1, prog_bar=True)
+        self.log("val_acc", val_acc, batch_size=num_id_val_nodes)
+        self.log("val_f1", val_f1, prog_bar=True, batch_size=num_id_val_nodes)
         return loss
     
     def test_step(self, batch, batch_idx):
@@ -119,6 +122,7 @@ class VanillaGNN(L.LightningModule):
 
         logits_test = logits[batch.test_mask].detach()
         y_test = batch.y[batch.test_mask].detach()
+        num_test_nodes = int(batch.test_mask.sum().item())
 
         # OOD Detection using MSP
         probs = F.softmax(logits_test, dim=1)
@@ -128,20 +132,27 @@ class VanillaGNN(L.LightningModule):
         ood_targets = 1 - y_test.sum(axis=1)
         test_auroc = self.auroc_metric(ood_scores, ood_targets)
 
-        self.log("test_auroc", test_auroc)
+        self.log("test_auroc", test_auroc, batch_size=num_test_nodes)
 
         # Classification Metrics on ID nodes
         id_mask_in_test = (y_test.sum(axis=1) == 1)
         
         id_logits = logits_test[id_mask_in_test]
         id_labels = torch.argmax(y_test[id_mask_in_test], dim=1)
+        num_id_test_nodes = int(id_mask_in_test.sum().item())
         
         id_preds = torch.argmax(id_logits, dim=1)
         test_acc = self.accuracy_metric(id_preds, id_labels)
         test_f1 = self.f1_metric(id_preds, id_labels)
+
+        test_ece_id = expected_calibration_error(
+            probs[id_mask_in_test].detach().cpu().numpy(),
+            id_labels.detach().cpu().numpy(),
+        )
         
-        self.log("test_acc", test_acc)
-        self.log("test_f1", test_f1)
+        self.log("test_acc", test_acc, batch_size=num_id_test_nodes)
+        self.log("test_f1", test_f1, batch_size=num_id_test_nodes)
+        self.log("test_ece_id", test_ece_id, batch_size=num_id_test_nodes)
         return test_auroc
 
     def configure_optimizers(self):

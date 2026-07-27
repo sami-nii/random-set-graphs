@@ -60,10 +60,24 @@ metadata_roman_empire = {
 }
 
 metadata_road = {
-    "in_channels":  {"values": [4]},   # x, y, width, height
-    "out_channels": {"values": [3]},   # 3 ID classes
+    "in_channels":  {"values": [4]},   # bounding-box centre and size
+    "out_channels": {"values": [3]},   # three most frequent ROAD actions by default
     "batch_size": {"values": [-1]},
     "num_neighbors": {"values": [-1]},  # full-batch
+    "road_max_nodes": {"values": [20000]},
+    "road_num_id_classes": {"values": [3]},
+    "road_split_seed": {"values": [0]},
+}
+
+metadata_nuscenes = {
+    "in_channels": {"values": [8]},
+    "out_channels": {"values": [3]},
+    "batch_size": {"values": [-1]},
+    "num_neighbors": {"values": [-1]},
+    "nuscenes_root": {"values": ["S:\\nuScenes\\v1.0-trainval"]},
+    "nuscenes_max_nodes": {"values": [20000]},
+    "nuscenes_num_id_classes": {"values": [3]},
+    "nuscenes_split_seed": {"values": [0]},
 }
 
 
@@ -238,10 +252,28 @@ sweep_random_set = {
         "num_layers": {"values": [2, 3]},
         "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
         "singletons_only": {"values": [False]},
+        "time_focal_set_budget": {"values": [False]},
+        "isotonic_calibration": {"values": [False]},
         "loss_ablation": {"values": ["full"]},
         "use_bce_loss": {"values": [True]},
         "use_mr_loss": {"values": [True]},
         "use_ms_loss": {"values": [True]},
+    },
+}
+
+# Fixed architecture and optimizer settings for fair post-hoc overhead timing.
+# Only the seed varies across the three repetitions.
+sweep_vanilla_overhead_benchmark = {
+    "method": "grid",
+    "metric": {"name": "val_f1", "goal": "maximize"},
+    "parameters": {
+        "seed": {"values": [0, 1, 2]},
+        "gnn_type": {"values": ["GCN"]},
+        "hidden_channels": {"values": [64]},
+        "num_layers": {"values": [2]},
+        "lr": {"values": [1e-3]},
+        "weight_decay": {"values": [1e-4]},
+        "patience": {"values": [30]},
     },
 }
 
@@ -262,6 +294,16 @@ def _clone_random_set_sweep(**parameter_overrides):
 sweep_random_set_ablation_singletons_only = _clone_random_set_sweep(
     singletons_only={"values": [True]},
     loss_ablation={"values": ["full"]},
+)
+
+sweep_random_set_ablation_budget_timing = _clone_random_set_sweep(
+    time_focal_set_budget={"values": [True]},
+)
+
+# Post-hoc one-vs-rest isotonic calibration fitted on labelled validation ID
+# nodes after RS-GNN training.  The underlying RS-GNN architecture is unchanged.
+sweep_random_set_isotonic_calibration = _clone_random_set_sweep(
+    isotonic_calibration={"values": [True]},
 )
 
 sweep_random_set_ablation_bce_only = _clone_random_set_sweep(

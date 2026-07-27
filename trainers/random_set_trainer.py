@@ -7,9 +7,13 @@ import sys
 import torch
 import gc
 import itertools # <--- Added for power set generation
+from time import perf_counter
+import numpy as np
 from torch_geometric.utils import subgraph
+from sklearn.metrics import roc_auc_score
 from .budgeting import train_embeddings, fit_gmm, overlaps, ellipse
 from utils.wandb_utils import init_wandb_run
+from utils.isotonic_calibration import OneVsRestIsotonicCalibrator, expected_calibration_error
 
 
 # Adjust import paths as needed
@@ -42,6 +46,95 @@ def _resolve_loss_ablation(config):
         raise ValueError("At least one random-set loss component must be enabled.")
 
     return loss_ablation, use_bce_loss, use_mr_loss, use_ms_loss
+
+
+def _synchronize_for_timing(device):
+    """Wait for queued CUDA work so wall-clock budget timings are accurate."""
+    if device == "cuda":
+        torch.cuda.synchronize()
+
+
+def _collect_probabilities(model, loader, split):
+    """Collect pignistic probabilities for one split without changing the model."""
+    all_probabilities, all_targets = [], []
+    was_training = model.training
+    model.eval()
+    with torch.inference_mode():
+        for batch in loader:
+            batch = batch.to(model.device)
+            mask = model._get_step_mask(batch, split)
+            if not mask.any():
+                continue
+            probabilities = model.get_pignistic_probs(model(batch))[mask]
+            all_probabilities.append(probabilities.cpu())
+            all_targets.append(batch.y[mask].cpu())
+    model.train(was_training)
+
+    if not all_probabilities:
+        raise RuntimeError(f"No {split} examples were available for isotonic calibration.")
+    return torch.cat(all_probabilities).numpy(), torch.cat(all_targets).numpy()
+
+
+def _id_targets(targets):
+    """Return labelled ID rows and their integer targets from one-hot labels."""
+    if targets.ndim != 2:
+        raise ValueError("Isotonic calibration currently expects one-hot ID/OOD labels.")
+    is_id = targets.sum(axis=1) == 1
+    return is_id, targets.argmax(axis=1).astype(np.int64)
+
+
+def _nll(probabilities, targets):
+    return float(-np.log(np.clip(probabilities[np.arange(len(targets)), targets], 1e-12, 1.0)).mean())
+
+
+def _entropy(probabilities):
+    probabilities = np.clip(probabilities, 1e-12, 1.0)
+    return -(probabilities * np.log(probabilities)).sum(axis=1)
+
+
+def _run_isotonic_calibration(model, val_loader, test_loader):
+    """Fit on labelled validation ID nodes and evaluate calibrated test scores."""
+    val_probabilities, val_targets_all = _collect_probabilities(model, val_loader, "val")
+    test_probabilities, test_targets_all = _collect_probabilities(model, test_loader, "test")
+
+    val_is_id, val_targets = _id_targets(val_targets_all)
+    test_is_id, test_targets = _id_targets(test_targets_all)
+    if not np.any(val_is_id):
+        raise RuntimeError("Validation split has no labelled ID nodes for isotonic calibration.")
+
+    calibrator = OneVsRestIsotonicCalibrator().fit(
+        val_probabilities[val_is_id], val_targets[val_is_id]
+    )
+    calibrated_val = calibrator.predict_proba(val_probabilities)
+    calibrated_test = calibrator.predict_proba(test_probabilities)
+
+    metrics = {
+        "isotonic_val_id_nll_before": _nll(val_probabilities[val_is_id], val_targets[val_is_id]),
+        "isotonic_val_id_nll_after": _nll(calibrated_val[val_is_id], val_targets[val_is_id]),
+        "isotonic_val_id_ece_before": expected_calibration_error(val_probabilities[val_is_id], val_targets[val_is_id]),
+        "isotonic_val_id_ece_after": expected_calibration_error(calibrated_val[val_is_id], val_targets[val_is_id]),
+    }
+    if np.any(test_is_id):
+        metrics.update({
+            "isotonic_test_id_nll_before": _nll(test_probabilities[test_is_id], test_targets[test_is_id]),
+            "isotonic_test_id_nll_after": _nll(calibrated_test[test_is_id], test_targets[test_is_id]),
+            "isotonic_test_id_ece_before": expected_calibration_error(test_probabilities[test_is_id], test_targets[test_is_id]),
+            "isotonic_test_id_ece_after": expected_calibration_error(calibrated_test[test_is_id], test_targets[test_is_id]),
+            "isotonic_test_id_acc_before": float(
+                (test_probabilities[test_is_id].argmax(axis=1) == test_targets[test_is_id]).mean()
+            ),
+            "isotonic_test_id_acc_after": float((calibrated_test[test_is_id].argmax(axis=1) == test_targets[test_is_id]).mean()),
+        })
+
+    ood_targets = 1 - test_targets_all.sum(axis=1).astype(np.int64)
+    if np.unique(ood_targets).size > 1:
+        metrics["isotonic_test_auroc_entropy_before"] = float(
+            roc_auc_score(ood_targets, _entropy(test_probabilities))
+        )
+        metrics["isotonic_test_auroc_entropy_after"] = float(
+            roc_auc_score(ood_targets, _entropy(calibrated_test))
+        )
+    return metrics
 
 
 def random_set_train(project_name, dataset_name, **kwargs):
@@ -141,6 +234,11 @@ def random_set_train(project_name, dataset_name, **kwargs):
     # Budget Override
     if (not singletons_only) and num_id_classes >= 10:
            print("Constructing budgeted focal sets")
+           time_focal_set_budget = bool(config.get("time_focal_set_budget", False))
+           device = 'cuda' if torch.cuda.is_available() else 'cpu'
+           if time_focal_set_budget:
+               _synchronize_for_timing(device)
+               budget_start_time = perf_counter()
            aux_model = RandomSetGNN(
                gnn_type=config.get("gnn_type", "GCN"),
                in_channels=num_features,
@@ -157,8 +255,6 @@ def random_set_train(project_name, dataset_name, **kwargs):
                use_mr_loss=use_mr_loss,
                use_ms_loss=use_ms_loss,
            ).gnn_model
-           device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
            base_data = train_loader.data if hasattr(train_loader, "data") else data_sample
            if base_data.y.dim() > 1:
                is_id = base_data.y.sum(dim=1) == 1
@@ -245,6 +341,12 @@ def random_set_train(project_name, dataset_name, **kwargs):
            focal_sets = [set(int(c) for c in s) for s in focal_sets]
            
            print(f"Budgeted focal sets size: {len(focal_sets)}")
+           if time_focal_set_budget:
+               _synchronize_for_timing(device)
+               focal_set_budget_seconds = perf_counter() - budget_start_time
+               print(f"Focal set budget construction time: {focal_set_budget_seconds:.3f} s")
+               wandb.log({"focal_set_budget_seconds": focal_set_budget_seconds})
+               wandb.run.summary["focal_set_budget_seconds"] = focal_set_budget_seconds
 
 
     # 3. Instantiate the Model
@@ -288,6 +390,18 @@ def random_set_train(project_name, dataset_name, **kwargs):
 
     # 5. Execution
     trainer.fit(model, train_loader, val_loader)
+    if bool(config.get("isotonic_calibration", False)):
+        print("Fitting one-vs-rest isotonic calibration on labelled validation ID nodes...")
+        isotonic_metrics = _run_isotonic_calibration(model, val_loader, test_loader)
+        wandb.log(isotonic_metrics)
+        for metric_name, metric_value in isotonic_metrics.items():
+            wandb.run.summary[metric_name] = metric_value
+        print(
+            "Isotonic test entropy AUROC: "
+            f"{isotonic_metrics.get('isotonic_test_auroc_entropy_before', float('nan')):.4f} "
+            "-> "
+            f"{isotonic_metrics.get('isotonic_test_auroc_entropy_after', float('nan')):.4f}"
+        )
     trainer.test(model, test_loader)
 
     # 6. Cleanup

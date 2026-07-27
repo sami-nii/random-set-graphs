@@ -8,6 +8,7 @@ from dataset_loader.loader_coauthor import load_coauthor_cs
 from dataset_loader.loader_amazon_ratings import load_amazon_ratings
 from dataset_loader.loader_roman_empire import load_roman_empire
 from dataset_loader.loader_road import loader_road
+from dataset_loader.loader_nuscenes import loader_nuscenes
 
 
 DATASET_STORAGE_PATH = "./dataset/"
@@ -33,5 +34,7 @@ def dataset_loader(dataset_name: str, config):
         return load_roman_empire(DATASET_STORAGE_PATH, config)
     elif dataset_name == "road":
         return loader_road(DATASET_STORAGE_PATH, config)
+    elif dataset_name == "nuscenes":
+        return loader_nuscenes(DATASET_STORAGE_PATH, config)
     else:
         raise ValueError(f"Dataset {dataset_name} not supported")

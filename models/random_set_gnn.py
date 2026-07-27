@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.models import EdgeCNN, GAT, GCN, GIN, GraphSAGE
 from torchmetrics import AUROC, Accuracy, F1Score
+from utils.isotonic_calibration import expected_calibration_error
 
 
 def generate_matrices(focal_sets, num_classes):
@@ -319,6 +320,11 @@ class RandomSetGNN(L.LightningModule):
 
             acc = (id_preds == id_targets).float().mean()
             self.log("test_acc_id", acc, batch_size=int(is_id.sum().item()))
+            test_ece_id = expected_calibration_error(
+                id_betp.detach().cpu().numpy(),
+                id_targets.detach().cpu().numpy(),
+            )
+            self.log("test_ece_id", test_ece_id, batch_size=int(is_id.sum().item()))
 
     def configure_optimizers(self):
         return torch.optim.Adam(
