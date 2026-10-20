@@ -1,6 +1,5 @@
 import torch
 import lightning as L
-from torch_geometric.nn.models import GCN, GraphSAGE, GAT, GIN, EdgeCNN
 import torch.nn as nn
 import torch.nn.functional as F
 import os
@@ -11,12 +10,10 @@ from utils.math import compute_uncertainties
 # from ood_metrics import fpr_at_95_tpr
 from torchmetrics import AUROC
 from torchmetrics.classification import F1Score
+from models.backbones import build_backbone
 from models.credal_layer import CredalLayer
 from models.credal_loss import CreNetLoss
 
-models_map = {
-    "GCN": GCN, "SAGE": GraphSAGE, "GAT": GAT, "GIN": GIN, "EdgeCNN": EdgeCNN
-}
 
 class credal_GNN_t(L.LightningModule):
     def __init__(
@@ -30,15 +27,16 @@ class credal_GNN_t(L.LightningModule):
         weight_decay: float = 0.0,
         delta = 0.5,
         ood_in_val: bool = True,
+        heads: int = 4,
+        dropout: float = 0.2,
         **kwargs,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
         
-        self.gnn_model = models_map[gnn_type](
-            in_channels=in_channels, hidden_channels=hidden_channels,
-            num_layers=num_layers, out_channels=hidden_channels,
-            act=F.sigmoid, **kwargs
+        self.gnn_model = build_backbone(
+            gnn_type, in_channels=in_channels, hidden_channels=hidden_channels,
+            num_layers=num_layers, heads=heads, dropout=dropout,
         )
         self.C = out_channels
         self.credal_layer_model = CredalLayer(input_dim=hidden_channels, C=out_channels)

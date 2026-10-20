@@ -19,6 +19,8 @@ def credal_train(project_name, dataset_name, **kwargs):
 
     config = wandb.config
 
+    L.seed_everything(int(config.get("seed", 0)), workers=True)
+
     wandb_logger = WandbLogger(project=project_name)
 
     # Instantiate the model

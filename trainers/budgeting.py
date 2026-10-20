@@ -5,8 +5,9 @@ from sklearn.manifold import TSNE
 from sklearn.mixture import GaussianMixture
 from scipy import linalg
 
-def train_embeddings(aux_model, x_train, batch_size, device='cpu', edge_index=None):
+def train_embeddings(aux_model, x_train, batch_size, device='cpu', edge_index=None, random_state=None):
     aux_model.to(device)
+    aux_model.eval()
     x_train = x_train.to(device).float()
     if edge_index is not None:
         edge_index = edge_index.to(device)
@@ -17,7 +18,7 @@ def train_embeddings(aux_model, x_train, batch_size, device='cpu', edge_index=No
         else:
             train_embeddings = aux_model(x_train, edge_index).cpu().numpy()
     
-    tsne_kwargs = {"n_components": 3, "init": "random", "perplexity": 30}
+    tsne_kwargs = {"n_components": 3, "init": "random", "perplexity": 30, "random_state": random_state}
     if "n_jobs" in inspect.signature(TSNE.__init__).parameters:
         tsne_kwargs["n_jobs"] = -1
     train_embedded_tsne = TSNE(**tsne_kwargs).fit_transform(train_embeddings)

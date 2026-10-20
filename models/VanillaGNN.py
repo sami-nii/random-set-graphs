@@ -1,19 +1,20 @@
 import torch
 import lightning as L
-from torch_geometric.nn.models import GCN, GraphSAGE, GAT, GIN, EdgeCNN
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from torchmetrics import Accuracy, F1Score, AUROC 
-from utils.isotonic_calibration import expected_calibration_error
+from sklearn.metrics import f1_score
+from models.backbones import build_backbone
+from utils.metrics import calibration_metrics, entropy, ood_metrics
 
-models_map = {
-    "GCN": GCN, "SAGE": GraphSAGE, "GAT": GAT, "GIN": GIN, "EdgeCNN": EdgeCNN
-}
 
 class VanillaGNN(L.LightningModule):
+    """Shared backbone + linear classifier + softmax, p_v = softmax(W z_v)."""
+
     def __init__(
         self,
         gnn_type: str,
@@ -24,20 +25,23 @@ class VanillaGNN(L.LightningModule):
         lr: float = 0.001,
         weight_decay: float = 0.0,
         ood_in_val: bool = True, # Flag to control validation behavior
+        heads: int = 4,
+        dropout: float = 0.2,
         **kwargs,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
         
-        # GNN outputs raw logits for the number of ID classes
-        self.gnn_model = models_map[gnn_type](
+        self.gnn_model = build_backbone(
+            gnn_type,
             in_channels=in_channels,
             hidden_channels=hidden_channels,
             num_layers=num_layers,
-            out_channels=out_channels, # This is the number of ID classes
-            act=F.sigmoid, 
-            **kwargs,
+            heads=heads,
+            dropout=dropout,
         )
+        # Linear classifier over the node embedding; outputs logits for the ID classes
+        self.head = nn.Linear(hidden_channels, out_channels)
         self.C = out_channels
 
         # Use PyTorch's built-in CrossEntropyLoss for stability
@@ -51,13 +55,23 @@ class VanillaGNN(L.LightningModule):
         self.lr = lr
         self.weight_decay = weight_decay
         self.ood_in_val = ood_in_val
+        self._test_outputs = []
 
         self.apply(self.weights_init)
 
+    def embed(self, data):
+        """Node embedding z_v (input of the classifier)."""
+        return self.gnn_model(data.x.float(), data.edge_index)
+
+    def layer_representations(self, data):
+        """[x^0, H^(1), ..., H^(L), logits], used by the joint-latent baselines."""
+        x0 = data.x.float()
+        hidden = self.gnn_model.layer_outputs(x0, data.edge_index)
+        return [x0] + hidden + [self.head(hidden[-1])]
+
     def forward(self, data):
         # The model should return raw logits
-        logits = self.gnn_model(data.x.float(), data.edge_index)
-        return logits
+        return self.head(self.embed(data))
 
     def training_step(self, batch, batch_idx):
         logits = self(batch)
@@ -117,43 +131,42 @@ class VanillaGNN(L.LightningModule):
         self.log("val_f1", val_f1, prog_bar=True, batch_size=num_id_val_nodes)
         return loss
     
+    def on_test_epoch_start(self):
+        self._test_outputs = []
+
     def test_step(self, batch, batch_idx):
         logits = self(batch)
+        probs = F.softmax(logits[batch.test_mask], dim=1)
+        self._test_outputs.append((probs.detach().cpu(), batch.y[batch.test_mask].detach().cpu()))
 
-        logits_test = logits[batch.test_mask].detach()
-        y_test = batch.y[batch.test_mask].detach()
-        num_test_nodes = int(batch.test_mask.sum().item())
+    def on_test_epoch_end(self):
+        if not self._test_outputs:
+            return
+        probs, y = (torch.cat(parts).numpy() for parts in zip(*self._test_outputs))
+        self._test_outputs = []
 
-        # OOD Detection using MSP
-        probs = F.softmax(logits_test, dim=1)
-        msp_scores, _ = torch.max(probs, dim=1)
-        ood_scores = -msp_scores
+        is_id = y.sum(axis=1) == 1
+        is_ood = (~is_id).astype(np.int64)
+        id_labels = y[is_id].argmax(axis=1)
+        metrics = {}
+        # OOD scores: maximum softmax probability s = 1 - max_i p_v(i), and softmax entropy
+        metrics.update(ood_metrics(1.0 - probs.max(axis=1), is_ood, "test_msp"))
+        metrics.update(ood_metrics(entropy(probs), is_ood, "test_entropy"))
+        metrics.update(calibration_metrics(probs[is_id], id_labels, "test_id"))
+        if is_id.any():
+            metrics["test_f1"] = float(f1_score(id_labels, probs[is_id].argmax(axis=1), average="micro"))
 
-        ood_targets = 1 - y_test.sum(axis=1)
-        test_auroc = self.auroc_metric(ood_scores, ood_targets)
-
-        self.log("test_auroc", test_auroc, batch_size=num_test_nodes)
-
-        # Classification Metrics on ID nodes
-        id_mask_in_test = (y_test.sum(axis=1) == 1)
-        
-        id_logits = logits_test[id_mask_in_test]
-        id_labels = torch.argmax(y_test[id_mask_in_test], dim=1)
-        num_id_test_nodes = int(id_mask_in_test.sum().item())
-        
-        id_preds = torch.argmax(id_logits, dim=1)
-        test_acc = self.accuracy_metric(id_preds, id_labels)
-        test_f1 = self.f1_metric(id_preds, id_labels)
-
-        test_ece_id = expected_calibration_error(
-            probs[id_mask_in_test].detach().cpu().numpy(),
-            id_labels.detach().cpu().numpy(),
-        )
-        
-        self.log("test_acc", test_acc, batch_size=num_id_test_nodes)
-        self.log("test_f1", test_f1, batch_size=num_id_test_nodes)
-        self.log("test_ece_id", test_ece_id, batch_size=num_id_test_nodes)
-        return test_auroc
+        # Names used by the existing sweeps and result scripts.
+        aliases = {
+            "test_auroc": "test_msp_auroc",
+            "test_auroc_entropy": "test_entropy_auroc",
+            "test_acc": "test_id_acc",
+            "test_ece_id": "test_id_ece",
+        }
+        for alias, key in aliases.items():
+            if key in metrics:
+                metrics[alias] = metrics[key]
+        self.log_dict(metrics)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(

@@ -20,6 +20,7 @@ def credal_frozen_joint_train(project_name, dataset_name, **kwargs):
     """
     wandb.init(project=project_name)
     config = wandb.config
+    L.seed_everything(int(config.get("seed", 0)), workers=True)
 
     # hyperparameters
     delta = config.get("delta", 0.5)

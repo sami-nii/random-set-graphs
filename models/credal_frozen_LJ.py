@@ -47,18 +47,10 @@ class CredalFrozenJoint(L.LightningModule):
         out_channels  = int(hp.get("out_channels", None))
 
         if None in (in_channels, hidden_ch, num_layers, out_channels):
-            # As a robust fallback, try grabbing from backbone.gnn_model if present
-            gm = self.backbone.gnn_model
-            in_channels  = in_channels  if in_channels  is not None else getattr(gm, "in_channels", None)
-            hidden_ch    = hidden_ch    if hidden_ch    is not None else getattr(gm, "hidden_channels", None)
-            num_layers   = num_layers   if num_layers   is not None else getattr(gm, "num_layers", None)
-            out_channels = out_channels if out_channels is not None else getattr(gm, "out_channels", None)
-            if None in (in_channels, hidden_ch, num_layers, out_channels):
-                raise RuntimeError("Unable to infer backbone hyperparameters to build joint representation.")
+            raise RuntimeError("Unable to infer backbone hyperparameters to build joint representation.")
 
-        # Joint = x^0 (in_channels) + (num_layers-1)*hidden + last_layer(out_channels)
-        # because PyG high-level models typically produce hidden for all but last layer, then out for final.
-        joint_dim = in_channels + max(num_layers - 1, 0) * hidden_ch + out_channels
+        # Joint = x^0 (in_channels) + num_layers * hidden (every backbone layer) + logits (out_channels)
+        joint_dim = in_channels + num_layers * hidden_ch + out_channels
 
         self.C = out_channels
         self.ood_in_val = ood_in_val
@@ -81,25 +73,10 @@ class CredalFrozenJoint(L.LightningModule):
     @torch.no_grad()
     def _get_joint_embeddings(self, data) -> torch.Tensor:
         """
-        Concatenate: input features (z^0) + outputs of each backbone GNN layer.
+        Concatenate: input features (z^0) + outputs of each backbone GNN layer + logits.
         Backbone is frozen/eval.
         """
-        x0 = data.x.float()
-        all_embeddings = [x0]
-        gnn = self.backbone.gnn_model
-
-        if not hasattr(gnn, "convs") or not hasattr(gnn, "act"):
-            raise NotImplementedError("Backbone must expose 'convs' and 'act' attributes.")
-
-        x = x0
-        for i in range(gnn.num_layers):
-            x = gnn.convs[i](x, data.edge_index)
-            if i < gnn.num_layers - 1:
-                x = gnn.act(x)
-            all_embeddings.append(x)
-
-        joint = torch.cat(all_embeddings, dim=1)  # [N, D_joint]
-        # Optional sanity check (first batch hit): assert joint.size(1) == credal input dim
+        joint = torch.cat(self.backbone.layer_representations(data), dim=1)  # [N, D_joint]
         if self.credal_layer_model is not None and joint.size(1) != self.credal_layer_model.input_dim:
             raise RuntimeError(
                 f"Computed joint dim {joint.size(1)} != credal input_dim {self.credal_layer_model.input_dim}. "

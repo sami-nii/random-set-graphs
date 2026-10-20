@@ -59,7 +59,46 @@ metadata_roman_empire = {
     "num_neighbors":{"values": [10]},
 }
 
+# --- Temporal road-scene graphs (paper Sec. 4.1, Tabs. focal_sets and hyperparams) ---
+# Inductive: graphs are batched 16 at a time. These entries also fix the
+# optimisation hyperparameters of Tab. hyperparams (they override the sweep).
+_road_scene_rs_gnn = {
+    "focal_set_strategy": {"values": ["budgeted"]},  # always budgeted on road scenes
+    "budget_k": {"values": [64]},
+    "alpha": {"values": [1e-3]},
+    "beta": {"values": [1e-3]},
+    "weight_decay": {"values": [0.0]},
+    "patience": {"values": [1000]},  # train for the full number of epochs
+}
 metadata_road = {
+    "in_channels": {"values": [37]},   # bbox (4) + actions (19) + locations (12) + node type (2)
+    "out_channels": {"values": [8]},   # ID agent classes {0..7}; OOD {8, 9}
+    "num_total_classes": {"values": [10]},
+    "batch_size": {"values": [16]},
+    "num_neighbors": {"values": [-1]},
+    "lr": {"values": [1e-3]},
+    "max_epochs": {"values": [30]},
+    **_road_scene_rs_gnn,
+}
+metadata_nuscenes = {
+    "in_channels": {"values": [10]},   # position (3) + size (3) + lidar/radar points (2) + node type (2)
+    "out_channels": {"values": [6]},   # ID categories {0..5}; OOD {6, 7}
+    "num_total_classes": {"values": [8]},
+    "batch_size": {"values": [16]},
+    "num_neighbors": {"values": [-1]},
+    "lr": {"values": [5e-4]},
+    "max_epochs": {"values": [80]},
+    "nuscenes_version": {"values": ["v1.0-mini"]},
+    **_road_scene_rs_gnn,
+}
+metadata_road_to_nuscenes = {
+    **metadata_road,
+    "out_channels": {"values": [10]},  # all ROAD classes are ID; nuScenes test nodes are OOD
+    "nuscenes_version": {"values": ["v1.0-mini"]},
+}
+
+# Earlier exploratory single-graph ROAD/nuScenes protocols (not used in the paper).
+metadata_road_objects = {
     "in_channels":  {"values": [4]},   # bounding-box centre and size
     "out_channels": {"values": [3]},   # three most frequent ROAD actions by default
     "batch_size": {"values": [-1]},
@@ -69,7 +108,7 @@ metadata_road = {
     "road_split_seed": {"values": [0]},
 }
 
-metadata_nuscenes = {
+metadata_nuscenes_objects = {
     "in_channels": {"values": [8]},
     "out_channels": {"values": [3]},
     "batch_size": {"values": [-1]},
@@ -81,15 +120,24 @@ metadata_nuscenes = {
 }
 
 
+# Shared backbone of every model (App. backbone_implementation): two-layer GATv2,
+# hidden size 128, 4 heads in the first layer and 1 in the second, dropout 0.2.
+BACKBONE = {
+    "gnn_type": {"values": ["GATv2"]},
+    "hidden_channels": {"values": [128]},
+    "num_layers": {"values": [2]},
+    "heads": {"values": [4]},
+    "dropout": {"values": [0.2]},
+}
+
+
 sweep_vanilla = {
     "method": "bayes",
     "metric": {"name": "val_f1", "goal": "maximize"},
     "parameters": {
+        **BACKBONE,
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
-        "hidden_channels": {"values": [64, 128, 256]},
-        "num_layers": {"values": [2, 3]},
         "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
-        "gnn_type": {"values": ["GCN", "SAGE"]},
         "patience": {"values": [30]},
     }
 }
@@ -113,12 +161,10 @@ sweep_credal = {
         "goal": "maximize"
     },
     "parameters": {
+        **BACKBONE,
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
-        "hidden_channels": {"values": [64, 128, 256]},
-        "num_layers": {"values": [2, 3]},
         "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
         "delta": {"distribution": "uniform", "min": 0.5, "max": 1.0},
-        "gnn_type": {"values": ["GCN", "SAGE"]},
         "patience": {"values": [10]},
     },
 }
@@ -131,12 +177,10 @@ sweep_credal_LJ = {
         "goal": "maximize"
     },
     "parameters": {
+        **BACKBONE,
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
-        "hidden_channels": {"values": [64, 128, 256]},
-        "num_layers": {"values": [2, 3]},
         "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
         "delta": {"distribution": "uniform", "min": 0.5, "max": 1.0},
-        "gnn_type": {"values": ["GCN", "SAGE"]},
         "patience": {"values": [10]},
     },
 }
@@ -246,10 +290,12 @@ sweep_random_set = {
     "method": "bayes",
     "metric": {"name": "val_auroc_entropy", "goal": "maximize"},
     "parameters": {
-        "gnn_type": {"values": ["GAT"]},
+        **BACKBONE,
+        "seed": {"values": [0]},
+        "focal_set_strategy": {"values": ["auto"]},
+        "budget_k": {"values": [64]},
+        "budget_warmup_epochs": {"values": [20]},
         "lr": {"distribution": "uniform", "min": 1e-5, "max": 1e-1},
-        "hidden_channels": {"values": [64, 128, 256]},
-        "num_layers": {"values": [2, 3]},
         "weight_decay": {"distribution": "uniform", "min": 1e-7, "max": 1e-1},
         "singletons_only": {"values": [False]},
         "time_focal_set_budget": {"values": [False]},
@@ -267,10 +313,8 @@ sweep_vanilla_overhead_benchmark = {
     "method": "grid",
     "metric": {"name": "val_f1", "goal": "maximize"},
     "parameters": {
+        **BACKBONE,
         "seed": {"values": [0, 1, 2]},
-        "gnn_type": {"values": ["GCN"]},
-        "hidden_channels": {"values": [64]},
-        "num_layers": {"values": [2]},
         "lr": {"values": [1e-3]},
         "weight_decay": {"values": [1e-4]},
         "patience": {"values": [30]},
@@ -342,10 +386,8 @@ sweep_random_set_ablation_focal_and_loss_grid = {
     "method": "grid",
     "metric": {"name": "val_auroc_entropy", "goal": "maximize"},
     "parameters": {
-        "gnn_type": {"values": ["GAT"]},
+        **BACKBONE,
         "lr": {"values": [1e-3, 1e-2]},
-        "hidden_channels": {"values": [64, 128]},
-        "num_layers": {"values": [2, 3]},
         "weight_decay": {"values": [1e-4, 1e-2]},
         "singletons_only": {"values": [False, True]},
         "loss_ablation": {"values": ["full", "bce_only", "bce_mr", "bce_ms"]},

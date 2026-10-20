@@ -40,46 +40,11 @@ class KNNDetector(L.LightningModule):
     # Internal: second-last-layer embeddings
     # ------------------------------------------------------------------
     def _get_embeddings(self, data):
-        """
-        Extract second-last GNN layer embeddings:
-
-          - If num_layers >= 2:
-              x_0 = data.x
-              for i in 0..num_layers-2:
-                  x = convs[i](x, edge_index); x = act(x)
-              return x
-          - Else (num_layers == 1): fallback to final logits.
-        """
+        """Penultimate features of the backbone: the node embedding z_v fed to the classifier."""
         device = next(self.backbone.parameters()).device
         data = data.to(device)
-
-        gnn = self.backbone.gnn_model
-
-        # If the model does not expose convs/act, fall back to logits
-        if not hasattr(gnn, "convs") or not hasattr(gnn, "act") or not hasattr(gnn, "num_layers"):
-            with torch.no_grad():
-                logits = self.backbone(data)
-            return logits
-
-        num_layers = gnn.num_layers
-        x = data.x.float()
-
-        # Only one layer -> no hidden representation; use logits
-        if num_layers <= 1:
-            with torch.no_grad():
-                logits = self.backbone(data)
-            return logits
-
-        edge_index = data.edge_index
-
-        # Run all but the last conv layer, with activation
         with torch.no_grad():
-            for i in range(num_layers - 1):
-                x = gnn.convs[i](x, edge_index)
-                x = gnn.act(x)
-
-        # x now is the second-last layer embedding [N, hidden_channels]
-        return x
+            return self.backbone.embed(data)
 
     # ------------------------------------------------------------------
     # Precomputation: build FAISS index on train embeddings

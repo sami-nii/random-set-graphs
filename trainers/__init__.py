@@ -11,7 +11,14 @@ from .knn_tester import knn_test
 from .energy_tester import energy_test
 from .knn_LJ_tester import knn_LJ_test
 from .gnn_safe_tester import gnnsafe_test
-# from .gebm_tester import gebm_test
+try:
+    from .gebm_tester import gebm_test
+except ImportError as _gebm_import_error:
+    # GEBM needs the external `graph_ebm` package (code of Fuchsgruber et al., 2024).
+    def gebm_test(*args, _error=_gebm_import_error, **kwargs):
+        raise ImportError(
+            "The GEBM baseline requires the `graph_ebm` package on PYTHONPATH."
+        ) from _error
 from .credal_frozen_trainer import credal_frozen_joint_train
 from .cagcn_trainer import cagcn_train
 from .random_set_trainer import random_set_train

@@ -1,23 +1,24 @@
-import os
-import sys
-
 import lightning as L
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn.models import EdgeCNN, GAT, GCN, GIN, GraphSAGE
 from torchmetrics import AUROC, Accuracy, F1Score
-from utils.isotonic_calibration import expected_calibration_error
+
+from models.backbones import build_backbone
+from utils.metrics import calibration_metrics, ood_metrics
 
 
 def generate_matrices(focal_sets, num_classes):
     """
-    Pre-computes matrices for fast Moebius inversion and Pignistic transformation.
+    Pre-computes the matrices of the focal family F:
+      - Moebius inversion matrix (Belief -> Mass), Eq. (mobius)
+      - Pignistic matrix (Mass -> BetP)
+      - Membership matrix, membership[i, c] = 1 if c in A_i (Plausibility of singletons)
+      - Singleton matrix, singleton[i, c] = 1 if A_i == {c} (Belief of singletons)
     """
     num_sets = len(focal_sets)
 
-    # 1. Moebius Inversion Matrix (Belief -> Mass)
     # M[i, j] = (-1)^(len(A_i) - len(A_j)) if A_j is subset of A_i, else 0
     moebius_mat = torch.zeros((num_sets, num_sets))
     for i, set_a in enumerate(focal_sets):
@@ -25,17 +26,20 @@ def generate_matrices(focal_sets, num_classes):
             if set_b.issubset(set_a):
                 moebius_mat[i, j] = (-1) ** (len(set_a) - len(set_b))
 
-    # 2. Pignistic Transformation Matrix (Mass -> Class Probability)
     # P[i, c] = 1/|A_i| if c in A_i, else 0
     pignistic_mat = torch.zeros((num_sets, num_classes))
+    membership_mat = torch.zeros((num_sets, num_classes))
+    singleton_mat = torch.zeros((num_sets, num_classes))
     for i, input_set in enumerate(focal_sets):
         cardinality = len(input_set)
-        if cardinality > 0:
-            for class_idx in input_set:
-                if class_idx < num_classes:
-                    pignistic_mat[i, class_idx] = 1.0 / cardinality
+        for class_idx in input_set:
+            if class_idx < num_classes:
+                pignistic_mat[i, class_idx] = 1.0 / cardinality
+                membership_mat[i, class_idx] = 1.0
+                if cardinality == 1:
+                    singleton_mat[i, class_idx] = 1.0
 
-    return moebius_mat, pignistic_mat
+    return moebius_mat, pignistic_mat, membership_mat, singleton_mat
 
 
 class RandomSetLayer(nn.Module):
@@ -48,6 +52,8 @@ class RandomSetLayer(nn.Module):
 
 
 class RandomSetLoss(nn.Module):
+    """L = BCE(Bel_target, Bel) + alpha * R_neg + beta * R_sum, Eq. (final_loss)."""
+
     def __init__(
         self,
         focal_sets,
@@ -57,10 +63,16 @@ class RandomSetLoss(nn.Module):
         use_bce=True,
         use_mr=True,
         use_ms=True,
+        num_classes=None,
     ):
         super().__init__()
         self.focal_sets = focal_sets
         self.register_buffer("moebius_mat", moebius_mat)
+        num_classes = num_classes or (max(max(s) for s in focal_sets) + 1)
+        membership = torch.zeros((len(focal_sets), num_classes))
+        for i, focal_set in enumerate(focal_sets):
+            membership[i, list(focal_set)] = 1.0
+        self.register_buffer("membership_mat", membership)
         self.alpha = alpha
         self.beta = beta
         self.use_bce = use_bce
@@ -72,12 +84,8 @@ class RandomSetLoss(nn.Module):
         pred_beliefs: (Batch, Num_Sets) - Output of the model
         target_indices: (Batch) - Integer ID labels
         """
-        device = pred_beliefs.device
-        target_beliefs = torch.zeros_like(pred_beliefs)
-
-        for i, input_set in enumerate(self.focal_sets):
-            member_check = torch.tensor([t.item() in input_set for t in target_indices], device=device)
-            target_beliefs[:, i] = member_check.float()
+        # Bel_target(A) = 1{y in A}
+        target_beliefs = self.membership_mat[:, target_indices.long()].t().to(pred_beliefs.dtype)
 
         pred_beliefs = torch.clamp(pred_beliefs, min=1e-7, max=1.0 - 1e-7)
         bce_loss = F.binary_cross_entropy(pred_beliefs, target_beliefs)
@@ -95,15 +103,6 @@ class RandomSetLoss(nn.Module):
             total_loss = total_loss + (self.beta * ms_loss)
 
         return total_loss, bce_loss, mr_loss, ms_loss
-
-
-models_map = {
-    "GCN": GCN,
-    "SAGE": GraphSAGE,
-    "GAT": GAT,
-    "GIN": GIN,
-    "EdgeCNN": EdgeCNN,
-}
 
 
 class RandomSetGNN(L.LightningModule):
@@ -124,6 +123,8 @@ class RandomSetGNN(L.LightningModule):
         use_mr_loss: bool = True,
         use_ms_loss: bool = True,
         ood_in_val: bool = True,
+        heads: int = 4,
+        dropout: float = 0.2,
         **kwargs,
     ):
         super().__init__()
@@ -135,17 +136,25 @@ class RandomSetGNN(L.LightningModule):
         self.weight_decay = weight_decay
         self.ood_in_val = ood_in_val
 
-        moebius_mat, pignistic_mat = generate_matrices(focal_sets, num_classes)
+        moebius_mat, pignistic_mat, membership_mat, singleton_mat = generate_matrices(focal_sets, num_classes)
         self.register_buffer("moebius_mat", moebius_mat)
         self.register_buffer("pignistic_mat", pignistic_mat)
+        self.register_buffer("membership_mat", membership_mat)
+        self.register_buffer("singleton_mat", singleton_mat)
 
-        self.gnn_model = models_map[gnn_type](
+        universal_set = set(range(num_classes))
+        self.universal_index = next(
+            (i for i, focal_set in enumerate(focal_sets) if focal_set == universal_set),
+            None,
+        )
+
+        self.gnn_model = build_backbone(
+            gnn_type,
             in_channels=in_channels,
             hidden_channels=hidden_channels,
             num_layers=num_layers,
-            out_channels=hidden_channels,
-            act=F.relu,
-            **kwargs,
+            heads=heads,
+            dropout=dropout,
         )
 
         self.rs_layer = RandomSetLayer(hidden_channels, len(focal_sets))
@@ -157,13 +166,15 @@ class RandomSetGNN(L.LightningModule):
             use_bce=use_bce_loss,
             use_mr=use_mr_loss,
             use_ms=use_ms_loss,
+            num_classes=num_classes,
         )
 
         self.train_acc = Accuracy(task="multiclass", num_classes=num_classes)
         self.train_f1 = F1Score(task="multiclass", num_classes=num_classes)
         self.val_f1 = F1Score(task="multiclass", num_classes=num_classes)
         self.val_auroc_metric = AUROC(task="binary")
-        self.test_auroc_metric = AUROC(task="binary")
+        self.val_auroc_credal_metric = AUROC(task="binary")
+        self._test_outputs = []
 
     def forward(self, data):
         h = self.gnn_model(data.x.float(), data.edge_index)
@@ -187,40 +198,48 @@ class RandomSetGNN(L.LightningModule):
 
         return mask
 
-    def get_pignistic_probs(self, beliefs):
+    def get_valid_masses(self, beliefs):
         """
-        Converts predicted Beliefs -> Masses -> Pignistic Probabilities
+        Belief head steps 3-8 (Fig. rsgnn_belief_head): Moebius inversion, clip
+        negative masses, assign the residual to the universal set when it is a
+        focal set, and renormalise. Returns the masses and a mask of degenerate
+        rows (total mass <= eps) for which BetP falls back to uniform.
         """
         masses = torch.matmul(beliefs, self.moebius_mat.t())
         masses = torch.clamp(masses, min=0.0)
-        residual_mass = torch.clamp(1.0 - masses.sum(dim=1, keepdim=True), min=0.0)
-
-        universal_set = set(range(self.num_classes))
-        universal_index = next(
-            (i for i, focal_set in enumerate(self.focal_sets) if focal_set == universal_set),
-            None,
-        )
-        if universal_index is not None:
-            masses[:, universal_index] = masses[:, universal_index] + residual_mass.squeeze(1)
+        if self.universal_index is not None:
+            residual_mass = torch.clamp(1.0 - masses.sum(dim=1), min=0.0)
+            masses[:, self.universal_index] = masses[:, self.universal_index] + residual_mass
 
         mass_sum = masses.sum(dim=1, keepdim=True)
-        zero_mass_rows = mass_sum.squeeze(1) <= 1e-8
-        if zero_mass_rows.any():
-            betp = torch.full(
-                (beliefs.size(0), self.num_classes),
-                1.0 / self.num_classes,
-                dtype=beliefs.dtype,
-                device=beliefs.device,
-            )
-            non_zero_rows = ~zero_mass_rows
-            if non_zero_rows.any():
-                normalized_masses = masses[non_zero_rows] / mass_sum[non_zero_rows]
-                betp[non_zero_rows] = torch.matmul(normalized_masses, self.pignistic_mat)
-            return betp
+        degenerate = mass_sum.squeeze(1) <= 1e-8
+        masses = torch.where(degenerate.unsqueeze(1), masses, masses / mass_sum.clamp_min(1e-8))
+        return masses, degenerate
 
-        masses = masses / mass_sum
+    def betp_from_masses(self, masses, degenerate):
         betp = torch.matmul(masses, self.pignistic_mat)
-        return betp
+        uniform = torch.full_like(betp, 1.0 / self.num_classes)
+        return torch.where(degenerate.unsqueeze(1), uniform, betp)
+
+    def get_pignistic_probs(self, beliefs):
+        """Beliefs -> valid masses -> pignistic probabilities BetP."""
+        masses, degenerate = self.get_valid_masses(beliefs)
+        return self.betp_from_masses(masses, degenerate)
+
+    def credal_width(self, masses, predictions):
+        """W_v = Pl({y_hat}) - Bel({y_hat}), Eq. (credal_width)."""
+        plausibility = torch.matmul(masses, self.membership_mat)
+        belief = torch.matmul(masses, self.singleton_mat)
+        width = plausibility - belief
+        return width.gather(1, predictions.unsqueeze(1)).squeeze(1)
+
+    def predict_uncertainty(self, beliefs):
+        """Returns BetP, pignistic entropy H_v (Eq. pignistic_entropy) and credal width W_v."""
+        masses, degenerate = self.get_valid_masses(beliefs)
+        betp = self.betp_from_masses(masses, degenerate)
+        entropy_scores = -torch.sum(betp * torch.log(betp + 1e-8), dim=1)
+        width = self.credal_width(masses, betp.argmax(dim=1))
+        return betp, entropy_scores, width
 
     def training_step(self, batch, batch_idx):
         beliefs = self(batch)
@@ -261,17 +280,14 @@ class RandomSetGNN(L.LightningModule):
             val_mask = self._get_step_mask(batch, "val")
             val_count = int(val_mask.sum().item())
             if val_count > 0:
-                val_beliefs = beliefs[val_mask]
-                val_betp = self.get_pignistic_probs(val_beliefs)
-                val_betp = torch.clamp(val_betp, min=1e-8)
-                entropy = -torch.sum(val_betp * torch.log(val_betp), dim=1)
-
-                y_val_all = batch.y[val_mask]
-                ood_targets = 1 - y_val_all.sum(dim=1).long()
+                _, entropy_scores, width = self.predict_uncertainty(beliefs[val_mask])
+                ood_targets = 1 - batch.y[val_mask].sum(dim=1).long()
 
                 if ood_targets.numel() > 0 and torch.unique(ood_targets).numel() > 1:
-                    self.val_auroc_metric.update(entropy, ood_targets)
+                    self.val_auroc_metric.update(entropy_scores, ood_targets)
+                    self.val_auroc_credal_metric.update(width, ood_targets)
                     self.log("val_auroc_entropy", self.val_auroc_metric, on_step=False, on_epoch=True, batch_size=val_count)
+                    self.log("val_auroc_credal", self.val_auroc_credal_metric, on_step=False, on_epoch=True, batch_size=val_count)
 
         y_val_full = batch.y
         is_id = y_val_full.sum(dim=1) == 1
@@ -293,38 +309,47 @@ class RandomSetGNN(L.LightningModule):
             self.log("val_loss", loss, batch_size=int(id_val_mask.sum().item()))
             self.log("val_f1", f1, batch_size=int(id_val_mask.sum().item()))
 
+    def on_test_epoch_start(self):
+        self._test_outputs = []
+
     def test_step(self, batch, batch_idx):
         beliefs = self(batch)
         test_mask = self._get_step_mask(batch, "test")
-        test_count = int(test_mask.sum().item())
-        if test_count == 0:
+        if not test_mask.any():
             return
 
-        test_beliefs = beliefs[test_mask]
-        y_test = batch.y[test_mask]
+        betp, entropy_scores, width = self.predict_uncertainty(beliefs[test_mask])
+        self._test_outputs.append((
+            betp.detach().cpu(),
+            entropy_scores.detach().cpu(),
+            width.detach().cpu(),
+            batch.y[test_mask].detach().cpu(),
+        ))
 
-        betp = self.get_pignistic_probs(test_beliefs)
-        eps = 1e-8
-        entropy = -torch.sum(betp * torch.log(betp + eps), dim=1)
+    def on_test_epoch_end(self):
+        if not self._test_outputs:
+            return
+        betp, entropy_scores, width, y = (torch.cat(parts).numpy() for parts in zip(*self._test_outputs))
+        self._test_outputs = []
 
-        ood_targets = 1 - y_test.sum(dim=1).long()
-        if ood_targets.numel() > 0 and torch.unique(ood_targets).numel() > 1:
-            self.test_auroc_metric.update(entropy, ood_targets)
-            self.log("test_auroc_entropy", self.test_auroc_metric, on_step=False, on_epoch=True, batch_size=test_count)
+        is_id = y.sum(axis=1) == 1
+        is_ood = (~is_id).astype(np.int64)
+        metrics = {}
+        metrics.update(ood_metrics(entropy_scores, is_ood, "test_entropy"))
+        metrics.update(ood_metrics(width, is_ood, "test_credal"))
+        metrics.update(calibration_metrics(betp[is_id], y[is_id].argmax(axis=1), "test_id"))
 
-        is_id = y_test.sum(dim=1) == 1
-        if is_id.sum() > 0:
-            id_betp = betp[is_id]
-            id_targets = torch.argmax(y_test[is_id], dim=1)
-            id_preds = torch.argmax(id_betp, dim=1)
-
-            acc = (id_preds == id_targets).float().mean()
-            self.log("test_acc_id", acc, batch_size=int(is_id.sum().item()))
-            test_ece_id = expected_calibration_error(
-                id_betp.detach().cpu().numpy(),
-                id_targets.detach().cpu().numpy(),
-            )
-            self.log("test_ece_id", test_ece_id, batch_size=int(is_id.sum().item()))
+        # Names used by the existing sweeps and result scripts.
+        aliases = {
+            "test_auroc_entropy": "test_entropy_auroc",
+            "test_auroc_credal": "test_credal_auroc",
+            "test_acc_id": "test_id_acc",
+            "test_ece_id": "test_id_ece",
+        }
+        for alias, key in aliases.items():
+            if key in metrics:
+                metrics[alias] = metrics[key]
+        self.log_dict(metrics)
 
     def configure_optimizers(self):
         return torch.optim.Adam(

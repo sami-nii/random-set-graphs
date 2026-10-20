@@ -1,7 +1,24 @@
-dataset
-__pycache__
-wandb
-graph-uncertainty
-checkpoints
+# --- large data & experiment artifacts: never commit ---------------------------
+dataset/
+checkpoints/
+outputs/
+wandb/
+lightning_logs/
+# Lightning default checkpoint dirs (<project>/<run_id>/checkpoints)
+graph-uncertainty/
 data-ub
 graph_ebm/
+
+# --- python ---------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.venv/
+
+# --- local tooling ----------------------------------------------------------------
+.DS_Store
+# paper sources: separate repository synced with Overleaf
+RS-GNN-Camera-Ready-

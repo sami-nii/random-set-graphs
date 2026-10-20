@@ -1,6 +1,5 @@
 import torch
 import lightning as L
-from torch_geometric.nn.models import GCN, GraphSAGE, GAT, GIN, EdgeCNN
 import torch.nn as nn
 import torch.nn.functional as F
 import os
@@ -8,13 +7,11 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from torchmetrics import AUROC
 from torchmetrics.classification import F1Score
+from models.backbones import build_backbone
 from models.credal_layer import CredalLayer
 from models.credal_loss import CreNetLoss
 from utils.math import compute_uncertainties
 
-models_map = {
-    "GCN": GCN, "SAGE": GraphSAGE, "GAT": GAT, "GIN": GIN, "EdgeCNN": EdgeCNN
-}
 
 class credal_GNN_LJ(L.LightningModule):
     """
@@ -33,18 +30,20 @@ class credal_GNN_LJ(L.LightningModule):
         weight_decay: float = 0.0,
         delta = 0.5,
         ood_in_val: bool = True,
+        heads: int = 4,
+        dropout: float = 0.2,
         **kwargs,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
         
-        self.gnn_model = models_map[gnn_type](
+        self.gnn_model = build_backbone(
+            gnn_type,
             in_channels=in_channels,
             hidden_channels=hidden_channels,
             num_layers=num_layers,
-            out_channels=hidden_channels, 
-            act=F.sigmoid,
-            **kwargs,
+            heads=heads,
+            dropout=dropout,
         )
         self.C = out_channels
         self.num_layers = num_layers
@@ -67,23 +66,9 @@ class credal_GNN_LJ(L.LightningModule):
         Captures embeddings from all layers, concatenates them, and then
         passes the joint representation to the credal layer.
         """
-        all_embeddings = []
-        # The input to the first layer is the node features
-        x = data.x.float()
+        # Embeddings of every backbone layer
+        all_embeddings = self.gnn_model.layer_outputs(data.x.float(), data.edge_index)
 
-        # Manually iterate through the GNN's convolutional layers
-        # This assumes the PyG model stores its layers in a `self.convs` ModuleList
-        if not hasattr(self.gnn_model, 'convs'):
-            raise NotImplementedError("This GNN architecture does not have a 'convs' attribute. Manual layer extraction is needed.")
-
-        for i in range(self.num_layers):
-            # Pass through the i-th convolutional layer
-            x = self.gnn_model.convs[i](x, data.edge_index)
-            # Apply the activation function
-            x = self.gnn_model.act(x)
-            # You might need to add other layers here if your GNN has them (e.g., batchnorm, dropout)
-            all_embeddings.append(x)
-            
         # Concatenate all layer embeddings to form the joint latent representation
         # Shape will be: [num_nodes, num_layers * hidden_channels]
         joint_representation = torch.cat(all_embeddings, dim=1)

@@ -114,7 +114,9 @@ def loader_snap_patents_year(DATASET_STORAGE_PATH, config):
     train_ratio = 0.6
     val_ratio = 0.2
 
-    indices = torch.randperm(num_nodes)
+    # 60/20/20 random split, seeded by `split_seed` so it is the same for every method
+    split_generator = torch.Generator().manual_seed(int(config.get("split_seed", 0)))
+    indices = torch.randperm(num_nodes, generator=split_generator)
     train_size = int(train_ratio * num_nodes)
     val_size = int(val_ratio * num_nodes)
     

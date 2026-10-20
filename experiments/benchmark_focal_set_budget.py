@@ -20,7 +20,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from dataset_loader.dataset_loader import dataset_loader
-from models.random_set_gnn import RandomSetGNN
+from trainers.random_set_trainer import _train_warmup_backbone
 from trainers.budgeting import ellipse, fit_gmm, overlaps, train_embeddings
 
 
@@ -65,14 +65,18 @@ def prepare_budget_inputs(args, device: str):
             "not the budgeted focal-set path."
         )
 
-    aux_model = RandomSetGNN(
-        gnn_type=args.gnn_type,
-        in_channels=data.x.shape[1],
-        hidden_channels=args.hidden_channels,
-        num_layers=args.num_layers,
-        focal_sets=[{class_idx} for class_idx in range(num_classes)],
-        num_classes=num_classes,
-    ).gnn_model
+    # Same trained warm-up GNN as the RS-GNN trainer (Alg. focal_sets).
+    aux_model = _train_warmup_backbone(
+        {
+            "gnn_type": args.gnn_type,
+            "hidden_channels": args.hidden_channels,
+            "num_layers": args.num_layers,
+            "budget_warmup_epochs": args.warmup_epochs,
+        },
+        num_features=data.x.shape[1],
+        num_id_classes=num_classes,
+        train_loader=train_loader,
+    )
 
     budget_mask = data.train_mask.bool() & is_id
     sampled_indices = []
@@ -137,8 +141,9 @@ def main() -> None:
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--samples-per-class", type=int, default=200)
     parser.add_argument("--max-cardinality", type=int, default=3)
-    parser.add_argument("--gnn-type", default="GAT")
-    parser.add_argument("--hidden-channels", type=int, default=64)
+    parser.add_argument("--gnn-type", default="GATv2")
+    parser.add_argument("--hidden-channels", type=int, default=128)
+    parser.add_argument("--warmup-epochs", type=int, default=20)
     parser.add_argument("--num-layers", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--num-neighbors", type=int, default=10)

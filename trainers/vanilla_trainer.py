@@ -32,6 +32,8 @@ def vanilla_train(project_name, dataset_name, save_path):
         num_layers=config["num_layers"],
         lr=config["lr"],
         weight_decay=config["weight_decay"],
+        heads=config.get("heads", 4),
+        dropout=config.get("dropout", 0.2),
     )
 
     # Trainer setup
@@ -39,6 +41,7 @@ def vanilla_train(project_name, dataset_name, save_path):
         devices="auto",
         accelerator="auto",
         logger=wandb_logger,
+        max_epochs=config.get("max_epochs", 1000),
         log_every_n_steps=1,
         callbacks=[
             EarlyStopping(

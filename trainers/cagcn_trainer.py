@@ -18,6 +18,7 @@ def cagcn_train(project_name, dataset_name, **kwargs):
     """
     wandb.init(project=project_name, job_type="train_cagcn")
     config = wandb.config
+    L.seed_everything(int(config.get("seed", 0)), workers=True)
 
     # select a pretrained checkpoint by seed index
     ckpt_path = find_best_checkpoints(dataset_name, num_models=5)[config["seed"]]

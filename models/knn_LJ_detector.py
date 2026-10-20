@@ -29,39 +29,9 @@ class KNN_LJ_Detector(L.LightningModule):
         self.train_loader = train_loader  # Store the train_loader for use in setup
 
     def _get_joint_embeddings(self, data):
-        """
-        Extracts and concatenates embeddings from all layers of a frozen GNN backbone.
-        This is a faithful, step-by-step replication of the internal forward pass of a
-        standard PyTorch Geometric high-level model (e.g., GCN, GraphSAGE).
-        """
-        all_embeddings = []
-        
-        # 1. Add initial node features (z^0)
-        x0 = data.x.float()
-        all_embeddings.append(x0)
-
-        # 2. Manually iterate through the GNN's layers, precisely replicating its forward pass
-        if not hasattr(self.backbone.gnn_model, 'convs') or not hasattr(self.backbone.gnn_model, 'act'):
-            raise NotImplementedError("Backbone GNN must have 'convs' (ModuleList) and 'act' attributes.")
-            
-        x = x0
-        for i in range(self.backbone.gnn_model.num_layers):
-            # Apply the i-th convolutional layer
-            x = self.backbone.gnn_model.convs[i](x, data.edge_index)
-            
-            # For all layers EXCEPT the last one, apply the backbone's activation and dropout
-            if i < self.backbone.gnn_model.num_layers - 1:
-                # Use the activation function from the loaded backbone (e.g., F.relu)
-                x = self.backbone.gnn_model.act(x) 
-                # Dropout is automatically disabled by self.backbone.eval() but we include for completeness
-    
-            
-            # The latent representation of layer (i+1) is the state of `x` after this step
-            all_embeddings.append(x)
-            
-        # 3. Concatenate all layer embeddings to form the joint representation
-        joint_representation = torch.cat(all_embeddings, dim=1)
-        return joint_representation
+        """Concatenate [x^0, H^(1), ..., H^(L), logits] of the frozen backbone."""
+        with torch.no_grad():
+            return torch.cat(self.backbone.layer_representations(data), dim=1)
 
     def setup(self, stage: str):
         """
