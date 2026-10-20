@@ -1,27 +1,30 @@
-"""Benchmark the one-time, budgeted focal-set construction for several K values.
+"""Tab. focal_budget: focal-set construction time as a function of the budget K.
 
-The expensive embedding, GMM, and ellipsoid stages are prepared once.  Each K
-then re-runs the overlap-selection stage on those fixed inputs, isolating the
-part of the focal-set budget computation affected by K.
+The K-independent stages (node sampling, warm-up GNN, embeddings, t-SNE, Gaussian fits and
+ellipsoid regions) run once; the overlap-scoring + top-K selection stage is then timed
+``--repetitions`` times for every K. "Estimated total" = setup + mean selection time.
+Writes ``<output>.csv`` and ``<output>.md``. Datasets need >= 10 ID classes (budgeted path).
+
+    python experiments/benchmark_focal_set_budget.py --dataset roman_empire --k-values 4 8 16 32 64
 """
+
+from __future__ import annotations
 
 import argparse
 import csv
 import statistics
-import sys
 import time
 from pathlib import Path
 
+import lightning as L
 import torch
-from torch_geometric.utils import subgraph
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
-
-from dataset_loader.dataset_loader import dataset_loader
-from trainers.random_set_trainer import _train_warmup_backbone
-from trainers.budgeting import ellipse, fit_gmm, overlaps, train_embeddings
+from cgnn.config import parse_overrides, resolve_config
+from cgnn.data import get_dataset, load_dataset
+from cgnn.hardware import pin_gpus
+from cgnn.methods.random_set import budget_device, budget_embeddings
+from cgnn.models.focal_sets import class_regions, overlap_scores, top_k_focal_sets, tsne_3d
+from cgnn.paths import Paths
 
 
 def synchronize(device: str) -> None:
@@ -29,180 +32,85 @@ def synchronize(device: str) -> None:
         torch.cuda.synchronize()
 
 
-def get_base_data(loader):
-    if hasattr(loader, "data") and hasattr(loader.data, "x") and hasattr(loader.data, "y"):
-        return loader.data
-    dataset = getattr(loader, "dataset", None)
-    if dataset is not None and len(dataset) == 1:
-        return dataset[0]
-    return next(iter(loader))
-
-
-def prepare_budget_inputs(args, device: str):
-    """Compute the K-independent part of the focal-set budget exactly once."""
-    config = {
-        "batch_size": args.batch_size,
-        "num_layers": args.num_layers,
-        "num_neighbors": args.num_neighbors,
-        "num_workers": args.num_workers,
-    }
-    train_loader, _, _ = dataset_loader(args.dataset, config)
-    data = get_base_data(train_loader)
-
-    if data.y.dim() > 1 and data.y.size(1) > 1:
-        num_classes = data.y.shape[1]
-        is_id = data.y.sum(dim=1) == 1
-        y_indices = data.y.argmax(dim=-1)
-    else:
-        train_mask = data.train_mask.bool()
-        num_classes = int(data.y[train_mask].max().item()) + 1
-        is_id = torch.ones_like(data.y, dtype=torch.bool)
-        y_indices = data.y
-
-    if num_classes < 10:
-        raise ValueError(
-            f"{args.dataset} has {num_classes} ID classes and uses the full power set, "
-            "not the budgeted focal-set path."
-        )
-
-    # Same trained warm-up GNN as the RS-GNN trainer (Alg. focal_sets).
-    aux_model = _train_warmup_backbone(
-        {
-            "gnn_type": args.gnn_type,
-            "hidden_channels": args.hidden_channels,
-            "num_layers": args.num_layers,
-            "budget_warmup_epochs": args.warmup_epochs,
-        },
-        num_features=data.x.shape[1],
-        num_id_classes=num_classes,
-        train_loader=train_loader,
-    )
-
-    budget_mask = data.train_mask.bool() & is_id
-    sampled_indices = []
-    for class_idx in range(num_classes):
-        class_nodes = torch.nonzero(budget_mask & (y_indices == class_idx), as_tuple=False).view(-1)
-        if class_nodes.numel() == 0:
-            raise ValueError(f"No training samples found for class {class_idx}.")
-        if class_nodes.numel() > args.samples_per_class:
-            class_nodes = class_nodes[: args.samples_per_class]
-        sampled_indices.append(class_nodes)
-
-    sampled_indices = torch.cat(sampled_indices).cpu()
-    sampled_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
-    sampled_mask[sampled_indices] = True
-    sampled_edge_index, _ = subgraph(sampled_mask, data.edge_index, relabel_nodes=True)
-
-    sampled_x = data.x[sampled_mask].to(device)
-    sampled_y = y_indices[sampled_mask]
-    embedded = train_embeddings(
-        aux_model,
-        sampled_x,
-        batch_size=args.batch_size,
-        device=device,
-        edge_index=sampled_edge_index.to(device),
-    )
-    classes = list(range(num_classes))
-    gms = fit_gmm(classes, embedded, sampled_y)
-    regions, means, max_len = ellipse(gms, num_classes, device=device)
-    return classes, regions, means, max_len
-
-
-def write_results(rows, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    headers = list(rows[0])
-    with output_path.with_suffix(".csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=headers)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    markdown = [
-        "# Focal-set budget K ablation",
-        "",
-        "Setup time is the shared, one-time embedding/GMM/ellipsoid preparation. "
-        "Overlap time is measured independently for each K; total is their sum.",
-        "",
-        "| Dataset | K | Repetitions | Focal sets | Setup (s) | Overlap mean ± sample std (s) | Estimated total (s) |",
-        "|---|---:|---:|---:|---:|---:|---:|",
-    ]
-    for row in rows:
-        overlap = f"{row['overlap_mean_seconds']:.3f} ± {row['overlap_std_seconds']:.3f}"
-        markdown.append(
-            f"| {row['dataset']} | {row['k']} | {row['repetitions']} | {row['num_focal_sets']} | "
-            f"{row['setup_seconds']:.3f} | {overlap} | {row['estimated_total_seconds']:.3f} |"
-        )
-    output_path.with_suffix(".md").write_text("\n".join(markdown) + "\n", encoding="utf-8")
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark budgeted focal-set construction across K values.")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--k-values", nargs="+", type=int, default=[4, 8, 16, 32, 64])
     parser.add_argument("--repetitions", type=int, default=3)
-    parser.add_argument("--samples-per-class", type=int, default=200)
-    parser.add_argument("--max-cardinality", type=int, default=3)
-    parser.add_argument("--gnn-type", default="GATv2")
-    parser.add_argument("--hidden-channels", type=int, default=128)
-    parser.add_argument("--warmup-epochs", type=int, default=20)
-    parser.add_argument("--num-layers", type=int, default=2)
-    parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--num-neighbors", type=int, default=10)
-    parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--output", type=Path, default=Path("plots") / "random_set_results" / "focal_set_budget_k_ablation")
+    parser.add_argument("--cpu", action="store_true")
+    parser.add_argument("--set", nargs="*", metavar="KEY=VALUE", help="RS-GNN config overrides")
+    parser.add_argument(
+        "--output", type=Path, default=None, help="default: outputs/tables/focal_budget_<dataset>"
+    )
     args = parser.parse_args()
 
-    if args.repetitions < 2:
-        raise ValueError("Use at least two repetitions to report a sample standard deviation.")
-    if any(k <= 0 for k in args.k_values):
-        raise ValueError("All K values must be positive.")
+    if not args.cpu:
+        pin_gpus(1)
+    spec = get_dataset(args.dataset)
+    overrides = parse_overrides(args.set)
+    if args.cpu:
+        overrides["accelerator"] = "cpu"
+    cfg = resolve_config("random_set", spec.default_config(), overrides)
+    if spec.num_id_classes < int(cfg["power_set_max_classes"]):
+        raise SystemExit(f"{args.dataset} has {spec.num_id_classes} ID classes: it uses the full power set.")
+    L.seed_everything(int(cfg["seed"]), workers=True)
+    device = budget_device(cfg)
+    paths = Paths.from_env()
+    bundle = load_dataset(args.dataset, cfg, paths=paths)
+    C = spec.num_id_classes
 
-    torch.manual_seed(7)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     synchronize(device)
-    setup_start = time.perf_counter()
-    classes, regions, means, max_len = prepare_budget_inputs(args, device)
+    start = time.perf_counter()
+    embeddings, labels = budget_embeddings(cfg, bundle, paths.output_dir)
+    regions = class_regions(tsne_3d(embeddings, int(cfg["seed"])), labels, C, device=device)
     synchronize(device)
-    setup_seconds = time.perf_counter() - setup_start
-    print(f"Prepared shared focal-set budget inputs in {setup_seconds:.3f} s on {device}.")
+    setup = time.perf_counter() - start
 
     rows = []
-    for k in sorted(set(args.k_values)):
-        elapsed = []
-        num_focal_sets = None
-        for repetition in range(args.repetitions):
+    for k in args.k_values:
+        times, focal_sets = [], None
+        for _ in range(args.repetitions):
             synchronize(device)
             start = time.perf_counter()
-            focal_sets = overlaps(
-                k=k,
-                classes=[str(class_idx) for class_idx in classes],
-                num_clusters=len(classes),
-                classes_dict={str(class_idx): class_idx for class_idx in classes},
-                regions=regions,
-                means=means,
-                max_len=max_len,
-                max_cardinality=args.max_cardinality,
-            )
+            scores = overlap_scores(regions, C, int(cfg["budget_max_cardinality"]))
+            focal_sets = top_k_focal_sets(scores, C, k)
             synchronize(device)
-            elapsed.append(time.perf_counter() - start)
-            num_focal_sets = len(focal_sets)
-            print(f"K={k}, repetition {repetition + 1}/{args.repetitions}: {elapsed[-1]:.3f} s")
-
-        overlap_mean = statistics.fmean(elapsed)
+            times.append(time.perf_counter() - start)
+        mean, std = statistics.fmean(times), statistics.stdev(times) if len(times) > 1 else 0.0
         rows.append(
             {
                 "dataset": args.dataset,
-                "k": k,
-                "repetitions": args.repetitions,
-                "num_focal_sets": num_focal_sets,
-                "setup_seconds": round(setup_seconds, 6),
-                "overlap_mean_seconds": round(overlap_mean, 6),
-                "overlap_std_seconds": round(statistics.stdev(elapsed), 6),
-                "estimated_total_seconds": round(setup_seconds + overlap_mean, 6),
+                "K": k,
+                "focal_sets": len(focal_sets),
+                "setup_s": setup,
+                "selection_mean_s": mean,
+                "selection_std_s": std,
+                "total_s": setup + mean,
             }
         )
+        print(rows[-1])
 
-    write_results(rows, args.output)
-    print(f"Saved K-ablation tables to {args.output.with_suffix('.md')} and .csv")
+    output = args.output or Path("outputs") / "tables" / f"focal_budget_{args.dataset}"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.with_suffix(".csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    lines = [
+        f"# Focal-set construction time vs K: {spec.paper_name}",
+        "",
+        "| Dataset | K | # Focal Sets | Setup (s) | Selection (s) | Estimated Total Time (s) |",
+        "|---|---:|---:|---:|---:|---:|",
+        *(
+            f"| {spec.paper_name} | {r['K']} | {r['focal_sets']} | {r['setup_s']:.3f} | "
+            f"{r['selection_mean_s']:.3f} ± {r['selection_std_s']:.3f} | {r['total_s']:.3f} |"
+            for r in rows
+        ),
+    ]
+    output.with_suffix(".md").write_text("\n".join(lines) + "\n")
+    print("\n".join(lines))
 
 
 if __name__ == "__main__":

@@ -1,105 +1,82 @@
-# Paper ↔ Code Map
+# Paper ↔ code map
 
-Paper: **Random-Set Graph Neural Networks** (NeurIPS 2026, main track, camera-ready).
-Source: `RS-GNN-Camera-Ready-/neurips_2026.tex`. This is the camera-ready main file. `MAIN.tex` is an older Overleaf copy and differs in one intro paragraph.
+Paper: *Random-Set Graph Neural Networks*, NeurIPS 2026 (camera-ready source: `neurips_2026.tex`).
+Numbers refer to the compiled camera-ready (LaTeX labels in brackets).
 
-Paper artefacts are referenced by their LaTeX `\label` (stable across recompiles).
+## Method (Sec. 3, App. D)
 
-Legend: ✅ the code matches the paper · ⚠️ partial match or discrepancy · ❌ no code in this repo.
+| Paper | Code |
+|---|---|
+| Belief head `Bel_v(A) = σ(g_θ(z_v))` | `cgnn/models/random_set.py::RandomSetGNN.forward` (`belief_head`, sigmoid) |
+| Möbius inversion, Eq. 1 [`eq:mobius`] | `cgnn/models/focal_sets.py::focal_set_matrices` (`moebius`), `RandomSetGNN.valid_masses` |
+| Belief head for node v, Fig. 11 [`fig:rsgnn_belief_head`]: clip, residual → Θ, renormalise, uniform fallback | `RandomSetGNN.valid_masses`, `RandomSetGNN.predict` |
+| Pignistic probability `BetP` | `focal_set_matrices` (`pignistic`), `RandomSetGNN.predict` |
+| Pignistic entropy, Eq. 2 [`eq:pignistic_entropy`] | `RandomSetGNN.predict` → score key `entropy` |
+| Credal width `W = Pl({ŷ}) − Bel({ŷ})`, Eq. 3 [`eq:credal_width`] | `RandomSetGNN.predict` (`membership`, `singleton` matrices) → score key `credal` |
+| Proposition 1 [`prop:validity`] | checked in `tests/test_random_set.py` (BetP ∈ credal set, W formula, singletons ⇒ W = 0) |
+| Worked example (Sec. 3, "Example") | `tests/test_random_set.py::test_worked_example_of_the_paper` |
+| Loss, Eq. 4 [`eq:final_loss`], α = β = 1e-3 | `cgnn/models/random_set.py::RandomSetLoss`; `alpha`, `beta` in `configs/methods/random_set.yaml` |
+| Power set when \|Y\| < 10 | `cgnn/methods/random_set.py::build_focal_sets` (`power_set_max_classes: 10`) |
+| Alg. 1 [`alg:focal_sets`]: 200 nodes/class, induced subgraph, warm-up GNN on labelled ID nodes, 3-D t-SNE, one Gaussian per class, 95% ellipsoid (χ²₃ = 7.815), Jaccard of voxelised regions, pairs → triples, top-K | `cgnn/methods/random_set.py::budget_embeddings`, `train_warmup_backbone`; `cgnn/models/focal_sets.py::tsne_3d`, `class_regions`, `overlap_scores`, `top_k_focal_sets` |
+| K = 64 non-singletons, max cardinality 3 | `budget_k`, `budget_max_cardinality` |
+| Alg. 2 [`alg:training`] | `RandomSetGNN.training_step` / `test_step`, `cgnn/runner.py` |
+| Hard-validity alternative (App. D.4) | not implemented (the paper describes it as an alternative) |
+| Isotonic calibration on ID validation nodes (App. D.11, Tab. 12) | `cgnn/uncertainty/isotonic.py`; method `random_set_isotonic` |
 
-## 1. Method (paper §3 `sec:method`, App. `sec:implementation_details`)
+## Experimental setup (Sec. 4.1, App. A, D)
 
-| Paper element | Where in code | Status |
-|---|---|---|
-| Belief head `Bel_v(A_k)=σ(g_θ(z_v))` | `models/random_set_gnn.py::RandomSetLayer` | ✅ |
-| Möbius inversion matrix M (`eq:mobius`) | `models/random_set_gnn.py::generate_matrices` (`moebius_mat`) | ✅ |
-| Pignistic matrix P, BetP | `generate_matrices` (`pignistic_mat`), `RandomSetGNN.get_pignistic_probs` | ✅ |
-| Clip → residual to Θ → renormalise → uniform fallback (`fig:rsgnn_belief_head`) | `RandomSetGNN.get_pignistic_probs` | ✅ |
-| Loss `BCE + α R_neg + β R_sum` (`eq:final_loss`), α=β=1e-3 | `models/random_set_gnn.py::RandomSetLoss` (`mr_loss`=R_neg, `ms_loss`=R_sum) | ✅ |
-| Pignistic entropy H_v (`eq:pignistic_entropy`) as the OOD score | `RandomSetGNN.validation_step/test_step` → `val_auroc_entropy`, `test_auroc_entropy` | ✅ |
-| **Credal-set width W_v (`eq:credal_width`)** as the epistemic score (second number per cell in `tab:ood`) | **not computed anywhere**. `test_step` logs only the entropy AUROC | ❌ |
-| Full power set when \|Y\|<10 | `trainers/random_set_trainer.py` (`itertools.combinations`, branch `num_id_classes < 10`) | ✅ |
-| Budgeted focal sets (`alg:focal_sets`): 200 nodes/class, warm-up GNN, t-SNE 3-D, one Gaussian per class, 95 % ellipsoid (χ²₃=7.815), Jaccard over voxels, pairs→triples, top-K | `trainers/random_set_trainer.py` ("Budget Override" block) + `trainers/budgeting.py` (`train_embeddings`, `fit_gmm`, `ellipse`, `overlaps`) | ⚠️ the "warm-up GNN" is an **untrained** fresh backbone (`aux_model = RandomSetGNN(...).gnn_model`, never trained before embedding). The paper says it is trained on labelled ID nodes |
-| K (budget) | config `budget_k` (default **32**). `sec:focal_sets` says "up to 64" | ⚠️ |
-| Max cardinality 3 | config `budget_max_cardinality` (default 3) | ✅ |
-| Seeds: GMM `random_state=7`; t-SNE unseeded | `trainers/budgeting.py` | ✅ (the paper says it is non-deterministic) |
-| Origin of the budgeting algorithm (RS-NN, CIFAR-10, TensorFlow) | `rsnnnotebookcoderough/RSNN_CIFAR10_RESNET50.ipynb` (reference only, not used) | — |
+| Paper | Code |
+|---|---|
+| Leave-out-class transductive protocol (App. D.9) | `cgnn/data/ood.py::apply_leave_out_classes` |
+| ID/OOD classes and split sizes, Tab. 10 [`tab:dataset_stats`] | `cgnn/data/sources/*.py` (`id_classes`, `ood_classes`); print with `cgnn data <dataset>` |
+| Feature sparsity, Tab. 11 [`tab:feature_sparsity`] | `experiments/feature_sparsity.py` |
+| GATv2 backbone for every model (App. D.2): 2 layers, hidden 128, heads 4 → 1, ReLU, dropout 0.2 | `cgnn/models/backbones.py::GATv2`; `gnn_type/gat_heads/act/dropout` in `configs/methods/{vanilla,credal*,random_set*}.yaml` |
+| Vanilla head `softmax(W z_v)` (App. D.1, D.3) | `cgnn/models/vanilla.py` (`head: linear`) |
+| Baselines (Sec. 4.1) | `cgnn/models/detectors/`, `cgnn/models/{credal,frozen,cagcn}.py`; keys in `README.md` |
+| Temporal road-scene graphs (App. A.2): scene + agent nodes, scene-centred and temporal edges, self-loops; ROAD window 4 / stride 4 / step 5, 37 features; nuScenes window 3 / stride 1, 10 features | `cgnn/data/sources/road_scene.py` (`road`, `nuscenes`, `road_to_nuscenes`) |
+| Focal sets on road scenes, Tab. 6 [`tab:focal_sets`] | dataset protocol `focal_set_strategy: budgeted`; `num_total_classes` adds OOD singletons |
+| Road-scene hyperparameters, Tab. 8 [`tab:hyperparams`] | `_ROAD_PROTOCOL`, `_NUSCENES_PROTOCOL` in `road_scene.py` |
+| Evaluation metrics (App. D.11): AUROC, AUPRC, FPR95, ECE (15 bins), NLL, Brier | `cgnn/metrics.py` (`ood_detection_metrics`, `calibration_metrics`) |
 
-## 2. Experimental protocol (paper `sec:setup`, `sec:transductive_experimental_setup`)
+## Results
 
-| Paper element | Where in code | Status |
-|---|---|---|
-| Leave-out-class transductive OOD: train = ID only; val/test = ID+OOD; OOD rows of `y` all zeros | every `dataset_loader/loader_*.py` (`data.y` one-hot over ID classes, zeros for OOD) | ✅ |
-| ID/OOD class splits (`tab:dataset_stats`) | hard-coded `OODclass`/`IDclass` in each loader | ✅ (matches `tab:dataset_stats`) |
-| Splits: Chameleon/Squirrel use the PyG split 0; Cora uses `Planetoid split="full"`; Amazon/Roman use npz split 0; ArXiv/Patents/Coauthor use a random 60/20/20 split | loaders | ⚠️ ArXiv/Patents/Coauthor use `torch.randperm` **with no seed** (see the `TODO fix the seed` in `dataset_loader.py`) |
-| Model selection uses **OOD validation AUROC** (Bayes sweep metric `val_auroc_entropy`) | `sweeps/sweeps.py::sweep_random_set` | ⚠️ a protocol detail the paper does not state explicitly |
-| Backbone "GATv2, 2 layers, hidden 128, 4→1 heads, dropout 0.2" (`sec:backbone_implementation`) | RS-GNN uses PyG `GAT` (v1 unless `v2=True`) with a swept hidden size {64,128,256} and depth {2,3}. Vanilla/credal/baselines sweep `GCN`/`SAGE` | ⚠️ big mismatch with the text |
-| NeighborLoader mini-batching | only for `batch_size>0` (arxiv, patents, reddit2). The other datasets are full-batch | ⚠️ |
-| Hardware/env: NVIDIA PyG container `nvcr.io/nvidia/pyg:24.05-py3` | `docker/Dockerfile` | ✅ |
-| Command `python main.py --dataset D --model M --count N` | `main.py` | ✅ |
+| Paper | How to produce |
+|---|---|
+| Tab. 1 [`tab:ood`], Figs. 5–7 | `scripts/reproduce_paper.sh` step `ood`; `cgnn results` |
+| Tabs. 2–3 [`tab:id_core_metrics`, `tab:ood_uncertainty_auroc`], Figs. 8–9 | step `road`; `experiments/summarize_runs.py road` |
+| Tab. 4 [`tab:ablation_main`], Fig. 10 | step `ablation` (`random_set_singletons`, `random_set_bce_only`, `random_set_bce_mr`) |
+| Tab. 7 [`tab:focal_budget`] | `experiments/benchmark_focal_set_budget.py` |
+| Tab. 9 [`tab:runtime`] | `experiments/benchmark_overhead.py` |
+| Tab. 12 [`tab:isotonic_calibration`] | step `isotonic`; `experiments/summarize_runs.py isotonic` |
 
-## 3. Datasets (paper §4.1, App. A; `tab:road_scene_dataset_stats`, `tab:dataset_stats`, `tab:feature_sparsity`)
+Figures 5–10 are plots of these tables. Their plotting scripts are not in this repository.
 
-| Dataset | Loader | Data on disk |
-|---|---|---|
-| Cora | `loader_cora.py` (PyG Planetoid) | `dataset/Cora` |
-| Coauthor CS | `loader_coauthor.py` | `dataset/coauthors` |
-| Reddit2 | `loader_reddit2.py` | `dataset/reddit2` |
-| ArXiv-year | `loader_ogb_arxiv_year.py` (`even_quantile_labels`, from Ma et al. 2024) | `dataset/ogbn_arxiv` |
-| Patents-year | `loader_snap_patents_year.py` | `dataset/snap-patents.mat` |
-| Chameleon, Squirrel | `loader_chameleon.py`, `loader_squirrel.py` (PyG WikipediaNetwork) | `dataset/chameleon`, `dataset/squirrel` |
-| Roman Empire, Amazon-Ratings | `loader_roman_empire.py`, `loader_amazon_ratings.py` (npz, Platonov et al.) | `dataset/*/*.npz` |
-| **ROAD (temporal scene graphs)** | ❌ The paper uses temporal scene graphs (scene node + agent nodes, window 4, stride 4, frame step 5, 37-dim features, 49k/26k/26k graphs, 10 agent classes, OOD {8,9}). `loader_road.py` builds something different: a single object-action graph with 4-dim bbox features, top-3 actions as ID, and 20k sampled nodes | ❌ |
-| **nuScenes (temporal scene graphs)** | ❌ The paper uses 8 categories, OOD {6,7}, 10-dim features, 307/39/38 graphs. `loader_nuscenes.py` is an "exploratory" single-graph protocol with 3 ID classes and a Windows default path (`S:\nuScenes`) | ❌ |
-| ROAD(ID)→nuScenes(OOD) cross-dataset | ❌ no code | ❌ |
-| Dataset statistics (`tab:dataset_stats`), feature sparsity (`tab:feature_sparsity`) | ❌ no script | ❌ |
-| `dataset/pokec.mat`, `dataset/tolokers` | not used by the paper | — |
+## Where the paper and the code cannot fully agree
 
-## 4. Baselines (paper §4.1, `tab:ood`)
+These are the points where the paper text is ambiguous or inconsistent. The code follows the choice stated here.
 
-| Paper name | `--model` | Trainer → Model | Needs vanilla ckpts? |
-|---|---|---|---|
-| Energy | `energy` | `energy_tester.py` → `energy_detector.py` | yes (top-1) |
-| KNN | `knn` | `knn_tester.py` → `knn_detector.py` (faiss) | yes |
-| ODIN | `odin` | `odin_tester.py` → `ODIN_Detector.py` | yes |
-| Mahalanobis | `mahalanobis` | `mahalanobis_tester.py` → `mahalanobis_Detector.py` | yes |
-| GNNSafe | `gnnsafe` | `gnn_safe_tester.py` → `gnnSafe_detector.py` | yes |
-| GEBM | `gebm` | `gebm_tester.py` → `GEBM_detector.py` | yes (top-5, indexed by `seed`). ⚠️ **`--model gebm` crashes**: the import is commented out in `trainers/__init__.py` because `gebm_tester.py` needs the external `graph_ebm` package (Fuchsgruber et al.'s repo, not vendored here; `.gitignore` mentions `graph_ebm/wandb`) |
-| CaGCN | `cagcn` | `cagcn_trainer.py` → `CaGCN.py` | yes (top-5) |
-| Classical ensemble / Credal ensemble | `ensemble` | `ensamble_tester.py` → `credal_Ensemble.py` (logs `auroc_*_classic` and `auroc_*_credal`) | yes (top-M) |
-| Credal final | `credal` | `credal_trainer.py` → `credal_GNN_t.py` + `credal_layer.py`, `credal_loss.py`, `utils/math.py`, `utils/solvers.py` | no |
-| CredalLJ | `credal_LJ` | `credal_LJ_trainer.py` → `credal_GNN_LJ.py` | no |
-| Credal frozen | `frozen` | `credal_frozen_trainer.py` → `credal_frozen_LJ.py` | yes (top-5) |
-| JLDE (presumably KNN on the joint latent) | `knn_LJ` | `knn_LJ_tester.py` → `knn_LJ_detector.py` | yes |
-| Vanilla softmax | `vanilla` | `vanilla_trainer.py` → `VanillaGNN.py`. Saves `checkpoints/{run}_{dataset}_val_f1=X.ckpt` | — |
-
-Order dependency: run `vanilla` first. Every post-hoc baseline calls `utils/model_manager.py::find_best_checkpoints`, which reads the **cwd-relative** `checkpoints/` directory. That directory does not exist right now. The `graph-uncertainty/` directory holds Lightning/W&B checkpoints for 298 runs, but they do not follow that naming scheme.
-
-The baseline code comes from the authors' earlier Credal-GNN work (Tolloso et al. 2025).
-
-## 5. Results: where each number or figure comes from
-
-| Paper artefact | Produced by | Stored result | Status |
-|---|---|---|---|
-| **`tab:ood`** OOD AUROC, 14 methods × 9 datasets | W&B project `graph-uncertainty` (best run per sweep) | no export in repo | ❌ no aggregation script |
-| `fig:results_heatmap`, `fig:topk_per_dataset`, `fig:rsgnn_ranks` (`Figures/outlined/fig_*.pdf`) | not in repo | — | ❌ |
-| **`tab:id_core_metrics`, `tab:ood_uncertainty_auroc`** (ROAD/nuScenes); `fig:road_scene_id_app`, `fig:overconfidence_collapse` | not in repo (temporal pipeline missing) | — | ❌ |
-| **`tab:ablation_main`** (0.731/0.703, …), `fig:ablation_summary` | `sweeps.py::sweep_random_set_ablation_*` → `plots/random_set_results.py` | `plots/random_set_results/{best_per_ablation,ablation_auroc_distribution}.png` (pngs also copied into `Figures/`; the ablation png differs from the paper copy) | ⚠️ |
-| **`tab:focal_budget`** focal-set budget vs K | `experiments/benchmark_focal_set_budget.py` (via `run_task_3.ps1`) | `plots/random_set_results/task_3_focal_set_budget_k_ablation_{coauthor,reddit2,roman_empire}.md` | ✅ matches |
-| Full-construction timing (Task 1) | `sweep_random_set_ablation_budget_timing` (`run_budget_timing.ps1`) → `experiments/summarize_focal_set_budget_runs.py` | `task_1_focal_set_budget_summary.md` | ✅ |
-| **`tab:runtime`** runtime overhead: RS-GNN column | `experiments/benchmark_random_set_layer_overhead.py` | `task_2_random_set_layer_overhead.md` | ✅ matches |
-| `tab:runtime`: Energy/ODIN/KNN/Mahalanobis columns | `sweep_vanilla_overhead_benchmark` + `experiments/benchmark_baseline_overhead.py` (`run_vanilla_overhead_benchmark.ps1`) → `experiments/summarize_baseline_overhead.py` | `task_2_baseline_overhead_summary.md`, `baseline_overhead_<ds>.md` | ✅ matches |
-| **`tab:isotonic_calibration`** | `sweep_random_set_isotonic_calibration` (`run_isotonic_calibration.ps1`) → `utils/isotonic_calibration.py`, `random_set_trainer.py::_run_isotonic_calibration` → `experiments/summarize_isotonic_calibration.py` | `isotonic_calibration_summary.md`, `{road,nuscenes}_isotonic_calibration_summary.md` | ⚠️ the paper says "5 seeds" and its values differ from the 3-run tables stored here |
-| `fig:motivation`, `fig:RSGNN`, `fig:road_example` (TikZ), `fig:dataset_examples` | `Figures/tikz/*.tex`, `Figures/scripts/make_fig_dataset_examples.py` (gitignored in the paper repo) | — | — |
-| `plots/before_after_random_set_graph.py`, `plots/random_set_diagnostics.py` | exploratory figures, not in the paper | — | — |
-
-`plots/random_set_results.py` and `experiments/summarize_*` read the **local** `wandb/run-*/files/{config.yaml,wandb-summary.json,output.log}` directories. Those are not in the repo right now because `wandb` is gitignored.
-
-## 6. Other reproducibility hazards
-
-- The `.ps1` scripts hard-code `C:\Users\tommy\anaconda3\envs\graph_uncertainty\python.exe` (Windows, co-author's machine).
-- `requirements.txt` has no version pins.
-- `vanilla_trainer` seeds with `L.seed_everything`. `random_set_trainer` sets **no seed**.
-- `VanillaGNN` uses `act=F.sigmoid` inside the backbone. RS-GNN uses `F.relu`.
-- The paper's code link is still the anonymous one (`anonymous.4open.science/r/RS-GNN`). README citation is "TBD".
-- `RS-GNN-Camera-Ready-/` is a nested git repo (Overleaf-synced) and shows as untracked in the code repo.
+1. **nuScenes focal sets.** Tab. 6 gives 72 (= 8 + 64) focal sets. With 6 ID classes there are only
+   C(6,2) + C(6,3) = 35 candidate pairs and triples, so the code gives at most 6 + 35 + 2 = 43. Reaching 72
+   would need pairs and triples that include OOD classes, which would use OOD labels, and App. D.6 says
+   these are never used. ROAD gives 74 as in the table (8 ID classes give 84 candidates).
+2. **Road-scene graph counts** (Tab. 5). The window parameters are taken from the text. The ROAD
+   train/val/test counts (49,123 / 26,302 / 26,301) depend on the video split and window semantics, which
+   the paper does not fully specify: the code uses `train_1` videos for training and halves the `val_1`
+   windows into validation and test. For nuScenes, 307/39/38 graphs fit the official v1.0-mini split
+   (8 train scenes; scene-0103 and scene-0916), which is the default.
+3. **ROAD → nuScenes features.** ROAD graphs have 37 features and nuScenes graphs have 10. The paper does
+   not say how the features were aligned, so the code zero-pads nuScenes to the ROAD width with the
+   node-type columns aligned (`_pad_features`).
+4. **Mini-batching.** App. D.2 mentions NeighborLoader mini-batching. The code mini-batches where the
+   dataset metadata sets `batch_size > 0` (ArXiv, Patents, Reddit2) and trains the smaller graphs
+   full-batch. Road-scene graphs are batched 16 at a time.
+5. **Warm-up GNN.** Alg. 1 does not give the warm-up training length. The code uses
+   `budget_warmup_epochs: 20` with the RS-GNN learning rate.
+6. **Model selection.** As in the CGNN protocol, sweeps select configurations by validation AUROC (ID + OOD
+   validation nodes, App. D.9). RS-GNN early-stops on the ID validation loss (patience 50, at most 200
+   epochs), as in the code that produced the paper's RS-GNN results.
+7. **Ablation names.** "BCE + margin" (Tab. 4) is BCE plus the negative-mass regulariser R_neg (`bce_mr`).
+8. **ODIN on Squirrel** in Tab. 1 is 47.28. The CGNN paper reports 62.28 for the same configuration.
+9. **Backbones.** The baseline rows of Tab. 1 on the seven datasets shared with the CGNN paper come from the
+   CGNN pipeline (GCN/SAGE backbones with sigmoid). This code uses the GATv2 backbone for every model, as
+   App. D.2 states, so baselines re-run with it will differ from those rows.

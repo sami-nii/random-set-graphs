@@ -19,7 +19,7 @@ RUN echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
 # Set the working directory inside the container
 WORKDIR /workspace
 
-# Copy only the requirements file
+# Copy only the requirements file (the repository is mounted at runtime, see docker-run.sh)
 COPY requirements-docker.txt /workspace/
 
 # Ensure the new user owns the workspace
@@ -36,6 +36,7 @@ RUN python -m pip install --upgrade pip && \
     pip install  --no-cache-dir --user -r ./requirements-docker.txt
 
 RUN python -m pip install torch_sparse torch_scatter
+
 # Set default command
 
 CMD ["/bin/bash"]

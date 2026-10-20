@@ -1,0 +1,75 @@
+# Paper: RS-GNN ablation 'BCE + margin' (Tab. ablation_main): BCE + negative-mass regulariser R_neg.
+# Same as random_set.yaml except `loss_ablation`.
+#
+# defaults: used by `cgnn run` (and as the base config of every sweep run).
+# sweep:    W&B sweep definition; dataset metadata (in/out_channels, batch_size, num_neighbors,
+#           num_total_classes) is merged in by `cgnn sweep`.
+# Ablations / studies of the paper: random_set_{singletons,bce_only,bce_mr,isotonic}.yaml.
+defaults:
+  # backbone (App. "Backbone and implementation details")
+  gnn_type: GATv2
+  hidden_channels: 128
+  num_layers: 2
+  gat_heads: 4
+  act: relu
+  dropout: 0.2
+  # optimisation
+  lr: 0.001
+  weight_decay: 0.0001
+  max_epochs: 200
+  patience: 50
+  monitor: val_loss
+  mode: min
+  # belief-space objective, Eq. (final_loss)
+  alpha: 0.001                  # R_neg weight
+  beta: 0.001                   # R_sum weight
+  loss_ablation: bce_mr           # full | bce_only | bce_mr | bce_ms | mr_ms
+  # focal sets (App. "Focal-set construction", Alg. focal_sets)
+  focal_set_strategy: auto      # auto: power set if |Y| < power_set_max_classes, else budgeted
+  power_set_max_classes: 10
+  budget_k: 64                  # non-singleton focal sets of the budgeted family
+  budget_max_cardinality: 3
+  budget_samples_per_class: 200
+  budget_warmup_epochs: 20      # epochs of the warm-up GNN (labelled ID nodes only)
+  # post-hoc isotonic calibration on ID validation nodes (Tab. isotonic_calibration)
+  isotonic_calibration: false
+sweep:
+  method: bayes
+  metric:
+    name: val_auroc_entropy
+    goal: maximize
+  parameters:
+    lr:
+      distribution: uniform
+      min: 1.0e-05
+      max: 0.1
+    weight_decay:
+      distribution: uniform
+      min: 1.0e-07
+      max: 0.1
+    gnn_type:
+      values: [GATv2]
+    hidden_channels:
+      values: [128]
+    num_layers:
+      values: [2]
+    gat_heads:
+      values: [4]
+    act:
+      values: [relu]
+    dropout:
+      values: [0.2]
+    loss_ablation:
+      values: [bce_mr]
+    focal_set_strategy:
+      values: [auto]
+    budget_k:
+      values: [64]
+    patience:
+      values: [50]
+    monitor:
+      values: [val_loss]
+    mode:
+      values: [min]
+    num_sanity_val_steps:
+      values: [0]

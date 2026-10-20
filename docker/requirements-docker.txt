@@ -1,7 +1,15 @@
-wandb
-tqdm
-matplotlib
+# Third-party dependencies on top of nvcr.io/nvidia/pyg:24.05-py3 (torch + PyG already installed).
+# The repository itself is installed in editable mode by docker-run.sh.
 lightning
-torchdyn
-ood-metrics
-faiss-gpu
+torchmetrics
+wandb
+pyyaml
+scipy
+scikit-learn
+faiss-cpu
+ogb
+pandas
+pytest
+# graph-ebm (GEBM baseline)
+jaxtyping
+typeguard

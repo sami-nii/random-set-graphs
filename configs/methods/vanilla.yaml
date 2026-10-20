@@ -1,0 +1,54 @@
+# Standard GNN classifier (MSP score). Also the backbone of every post-hoc method: its best checkpoints (by val_auroc) are what `cgnn` selects as backbones.
+#
+# defaults: used by `cgnn run` (and as the base config of every sweep run).
+# sweep:    W&B sweep definition; dataset metadata (in/out_channels, batch_size, num_neighbors) is merged in by `cgnn sweep`.
+defaults:
+  # RS-GNN paper backbone for every model: 2-layer GATv2, hidden 128, heads 4 -> 1, ReLU, dropout 0.2
+  gnn_type: GATv2
+  hidden_channels: 128
+  num_layers: 2
+  gat_heads: 4
+  act: relu
+  dropout: 0.2
+  head: linear  # softmax(W z_v) on the node embedding
+  lr: 0.01
+  weight_decay: 0.0005
+  patience: 30
+  monitor: val_auroc
+  mode: max
+sweep:
+  method: bayes
+  metric:
+    name: val_auroc
+    goal: maximize
+  parameters:
+    lr:
+      distribution: uniform
+      min: 1.0e-05
+      max: 0.1
+    hidden_channels:
+      values: [128]
+    num_layers:
+      values: [2]
+    weight_decay:
+      distribution: uniform
+      min: 1.0e-07
+      max: 0.1
+    gnn_type:
+      values: [GATv2]
+    gat_heads:
+      values: [4]
+    act:
+      values: [relu]
+    dropout:
+      values: [0.2]
+    head:
+      values: [linear]
+    patience:
+      values: [30]
+    monitor:
+      values: [val_auroc]
+    mode:
+      values: [max]
+    num_sanity_val_steps:
+      values: [0]
