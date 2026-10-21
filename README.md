@@ -13,8 +13,14 @@ The repository is built on [`cgnn`](https://github.com/matteotolloso/graph-uncer
 of *Credal Graph Neural Networks*: the same leave-out-class OOD protocol, runner, baselines and tests,
 extended with RS-GNN, Cora/Chameleon and the temporal road-scene benchmarks.
 
+**Documentation**
+- [docs/REPRODUCING.md](docs/REPRODUCING.md): step-by-step reproduction of every table, including a reduced plan.
+- [docs/USING_RSGNN.md](docs/USING_RSGNN.md): RS-GNN on your own graph (Python API, custom datasets).
+- [docs/PAPER_CODE_MAP.md](docs/PAPER_CODE_MAP.md): paper equations, algorithms and tables → code.
+
 ## Install
 ```bash
+git clone --recurse-submodules https://github.com/sami-nii/random-set-graphs.git && cd random-set-graphs
 conda env create -f environment.yml && conda activate rsgnn    # or an env with torch + PyG
 pip install -e ".[all]"                                        # the package, CLI, optional deps, tests
 git submodule update --init graph-ebm && pip install --no-build-isolation -e graph-ebm   # GEBM baseline
@@ -23,8 +29,9 @@ cgnn doctor                                                    # checks deps, da
 ```
 Docker (NVIDIA PyG image `nvcr.io/nvidia/pyg:24.05-py3`): `bash docker/docker-build.sh && bash docker/docker-run.sh`.
 
-Datasets live under `dataset/` (`CGNN_DATA_DIR`); standard benchmarks are downloaded by PyG/OGB on first
-use. Checkpoints go to `checkpoints/` (`CGNN_CKPT_DIR`), run summaries to `outputs/` (`CGNN_OUTPUT_DIR`).
+Datasets live under `dataset/` (`CGNN_DATA_DIR`). `bash scripts/download_data.sh` fetches every
+dataset that can be downloaded and prints instructions for the manual ones (Patents, ROAD, nuScenes).
+Checkpoints go to `checkpoints/` (`CGNN_CKPT_DIR`), run summaries to `outputs/` (`CGNN_OUTPUT_DIR`).
 
 ## Quick start
 ```bash
@@ -35,8 +42,20 @@ cgnn describe random_set                                          # defaults and
 python -m pytest -q -m "not slow"                                 # test suite on CPU
 ```
 
+## RS-GNN on your own graph
+```python
+from cgnn import rsgnn
+
+data = rsgnn.prepare_graph(x, edge_index, y, train_mask, val_mask, test_mask,
+                           id_classes=[2, 3, 4], ood_classes=[0, 1])   # leave-out-class protocol
+model = rsgnn.fit(data)                     # focal sets + training with the paper's defaults
+out = rsgnn.predict(model, data)            # probs, prediction, entropy (total), credal_width (epistemic)
+```
+Runnable example: `python examples/rsgnn_on_your_graph.py`. Details: [docs/USING_RSGNN.md](docs/USING_RSGNN.md).
+
 ## Reproducing the paper
-`bash scripts/reproduce_paper.sh` prints the full pipeline (`EXECUTE=1` runs it; `STEPS=...` selects steps).
+Full guide: [docs/REPRODUCING.md](docs/REPRODUCING.md). `bash scripts/reproduce_paper.sh` prints the full
+pipeline (`EXECUTE=1` runs it; `STEPS=...` selects steps).
 
 | Paper | Step | Commands |
 |---|---|---|
@@ -123,10 +142,12 @@ cgnn/data/         dataset registry, leave-out-class split, loaders; sources/ ha
 cgnn/uncertainty/  credal intervals and entropies, ensembles, isotonic calibration
 cgnn/runner.py     generic runner; cgnn/cli.py is the `cgnn` command; results.py builds W&B tables
 configs/           defaults.yaml and one YAML per method (defaults + W&B sweep space)
-experiments/       focal-set budget and overhead benchmarks, summaries of local runs
-scripts/           reproduce_paper.sh
+experiments/       focal-set budget, overhead and feature-sparsity scripts, summaries of local runs
+examples/          rsgnn_on_your_graph.py: the Python API on a custom graph
+cgnn/rsgnn.py      Python API: prepare_graph, focal_sets, fit, predict
+scripts/           reproduce_paper.sh, download_data.sh
 tests/             pytest suite (every method runs end-to-end on a synthetic graph)
-docs/              PAPER_CODE_MAP.md: paper section/table → code
+docs/              REPRODUCING.md, USING_RSGNN.md, PAPER_CODE_MAP.md
 docker/            NVIDIA PyG container
 graph-ebm/         GEBM baseline (git submodule)
 results/legacy/    outputs of the pre-port code (reference only)

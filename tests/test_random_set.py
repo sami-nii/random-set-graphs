@@ -129,3 +129,23 @@ def test_gatv2_backbone_matches_the_paper():
     assert model(data).shape == (10, 3)
     assert model.embedding(data).shape == (10, 128)
     assert model.joint_latent(data).shape == (10, model.joint_latent_dim) == (10, 16 + 2 * 128 + 3)
+
+
+def test_public_api_end_to_end():
+    """cgnn.rsgnn: prepare -> focal sets -> fit -> predict on a small graph (README / docs/USING_RSGNN.md)."""
+    from cgnn import rsgnn
+    from cgnn.data.sources.synthetic import make_sbm_graph
+    from cgnn.data.splits import random_split_masks
+
+    g = make_sbm_graph(num_nodes=120, seed=0)
+    train, val, test = random_split_masks(g.num_nodes, 0.6, 0.2, split_seed=0)
+    data = rsgnn.prepare_graph(
+        g.x, g.edge_index, g.y, train, val, test, id_classes=[2, 3, 4], ood_classes=[0, 1]
+    )
+    families = rsgnn.focal_sets(data)
+    assert families == power_set(3)
+    model = rsgnn.fit(data, families=families, max_epochs=2, accelerator="cpu", progress_bar=False)
+    out = rsgnn.predict(model, data)
+    assert out["probs"].shape == (120, 3)
+    assert torch.allclose(out["probs"].sum(1), torch.ones(120), atol=1e-5)
+    assert out["entropy"].shape == out["credal_width"].shape == out["prediction"].shape == (120,)
