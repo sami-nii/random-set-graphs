@@ -59,8 +59,10 @@ bash scripts/download_data.sh         # every dataset that can be downloaded aut
 Only the annotation files of ROAD and nuScenes are used, not images or LiDAR. The temporal scene graphs
 are built and cached on first use.
 
-`cgnn data <dataset>` prints the ID/OOD split sizes. They should match paper Tab. 10; for example,
-Cora gives `train(ID)=421 | val ID/OOD=167/333 | test ID/OOD=316/684`.
+`cgnn data <dataset>` prints the ID/OOD split sizes. For datasets with a public split they match paper
+Tab. 10 exactly; for example, Cora gives `train(ID)=421 | val ID/OOD=167/333 | test ID/OOD=316/684`.
+ArXiv, Patents and Coauthor use a seeded random split (`split_seed: 0`), so their counts differ
+slightly from the paper's unseeded split.
 
 ## 3. Weights & Biases
 
@@ -94,10 +96,16 @@ STEPS="ood" DATASETS="cora" EXECUTE=1 bash scripts/reproduce_paper.sh
 | **Tab. 9**: per-forward overhead | `cost` | 3 vanilla backbones, then `experiments/benchmark_overhead.py` | `outputs/tables/overhead_<ds>.md` |
 | **Tab. 11**: feature sparsity | — | `python experiments/feature_sparsity.py` | `outputs/tables/feature_sparsity/` |
 
-**How Tab. 1 numbers are selected.** For each method and dataset, `cgnn results` takes the sweep runs
-with the best validation score. It picks the uncertainty score with the best validation AUROC
-(entropy or credal width for RS-GNN; EU/AU for credal methods) and reports the mean ± std of the test
-AUROC over the top-5 runs (`-k`). Test labels are never used for selection.
+**How Tab. 1 numbers are selected.** `cgnn results` (default `--table rsgnn`) prints the paper's
+layout: 14 methods × 9 datasets, plus Mean and Rank columns.
+- For every uncertainty score of a method, it takes the 5 runs of the sweep with the best validation
+  AUROC for that score (`-k`) and reports their mean test AUROC.
+- Methods with two scores print both: `entropy/credal` for RS-GNN, `AU/EU` for the credal and
+  ensemble rows.
+- Mean and Rank use the first value of each cell.
+- Test labels are never used for selection.
+
+`--table cgnn` prints the CGNN paper's table instead. Tab. 4 reports the best run of each sweep (`-k 1`).
 
 **Order matters.** Post-hoc baselines, the ensembles, CaGCN and CGNN post train load the best `vanilla`
 checkpoints of the same dataset (`checkpoints/vanilla/`), so run the `vanilla` sweep first.

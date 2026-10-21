@@ -1,7 +1,7 @@
 """The single generic experiment runner used by `cgnn run`, `cgnn sweep` and the tests.
 
 Order of operations is deliberate (it fixes the RNG consumption, so seeded runs
-reproduce the paper's experiments):
+reproduce exactly):
 
 trainable:  resolve cfg -> seed -> build model -> trainer -> load data -> fit -> test
             (methods with ``build_needs_data``: seed -> load data -> build -> trainer -> fit -> test)

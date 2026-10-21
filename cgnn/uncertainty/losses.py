@@ -1,4 +1,4 @@
-"""Credal DRO objective (paper Eqs. 9-10)."""
+"""Credal DRO objective (CGNN paper Eqs. 9-10)."""
 
 from __future__ import annotations
 

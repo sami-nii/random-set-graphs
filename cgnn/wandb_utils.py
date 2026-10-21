@@ -11,7 +11,7 @@ import traceback
 from collections.abc import Mapping
 from typing import Any
 
-DEFAULT_PROJECT = "graph-uncertainty"
+DEFAULT_PROJECT = "rs-gnn"
 
 
 def make_logger(project: str, mode: str, *, name: str | None = None, save_dir: str | None = None):

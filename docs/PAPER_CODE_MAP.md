@@ -42,9 +42,9 @@ Numbers refer to the compiled camera-ready (LaTeX labels in brackets).
 
 | Paper | How to produce |
 |---|---|
-| Tab. 1 [`tab:ood`], Figs. 5–7 | `scripts/reproduce_paper.sh` step `ood`; `cgnn results` |
+| Tab. 1 [`tab:ood`], Figs. 5–7 | `scripts/reproduce_paper.sh` step `ood`; `cgnn results` (`cgnn/results.py::RSGNN_ROWS`, `rsgnn_table`) |
 | Tabs. 2–3 [`tab:id_core_metrics`, `tab:ood_uncertainty_auroc`], Figs. 8–9 | step `road`; `experiments/summarize_runs.py road` |
-| Tab. 4 [`tab:ablation_main`], Fig. 10 | step `ablation` (`random_set_singletons`, `random_set_bce_only`, `random_set_bce_mr`) |
+| Tab. 4 [`tab:ablation_main`], Fig. 10 | step `ablation` (`random_set_singletons`, `random_set_bce_only`, `random_set_bce_mr`); best run per sweep (`-k 1`) |
 | Tab. 7 [`tab:focal_budget`] | `experiments/benchmark_focal_set_budget.py` |
 | Tab. 9 [`tab:runtime`] | `experiments/benchmark_overhead.py` |
 | Tab. 12 [`tab:isotonic_calibration`] | step `isotonic`; `experiments/summarize_runs.py isotonic` |
@@ -75,8 +75,16 @@ These are the points where the paper text is ambiguous or inconsistent. The code
 6. **Model selection.** As in the CGNN protocol, sweeps select configurations by validation AUROC (ID + OOD
    validation nodes, App. D.9). RS-GNN early-stops on the ID validation loss (patience 50, at most 200
    epochs), as in the code that produced the paper's RS-GNN results.
-7. **Ablation names.** "BCE + margin" (Tab. 4) is BCE plus the negative-mass regulariser R_neg (`bce_mr`).
-8. **ODIN on Squirrel** in Tab. 1 is 47.28. The CGNN paper reports 62.28 for the same configuration.
-9. **Backbones.** The baseline rows of Tab. 1 on the seven datasets shared with the CGNN paper come from the
+7. **"Total/epistemic" in Tab. 1.** For RS-GNN the two values are pignistic entropy and credal width.
+   For the credal and ensemble rows, the first value is the CGNN **AU** score (aleatoric), not a total
+   uncertainty. The table builder follows the numbers (`AU/EU`), not the caption.
+8. **Ablation names.** "BCE + margin" (Tab. 4) is BCE plus the negative-mass regulariser R_neg (`bce_mr`).
+9. **ODIN on Squirrel** in Tab. 1 is 47.28. The CGNN paper reports 62.28 for the same configuration.
+10. **Random splits.** For ArXiv, Patents and Coauthor, the split sizes in Tab. 10 come from unseeded
+    random 60/20/20 draws, which cannot be recovered. The code uses `split_seed: 0`, so the ID/OOD counts
+    differ slightly (for example Coauthor train ID 8,792 instead of 8,813). Public splits match exactly.
+11. **Seeding of the K benchmark.** App. D.6 says t-SNE was not seeded in the focal-set budget
+    benchmark. The code seeds it with the run seed. Construction times are unaffected.
+12. **Backbones.** The baseline rows of Tab. 1 on the seven datasets shared with the CGNN paper come from the
    CGNN pipeline (GCN/SAGE backbones with sigmoid). This code uses the GATv2 backbone for every model, as
    App. D.2 states, so baselines re-run with it will differ from those rows.

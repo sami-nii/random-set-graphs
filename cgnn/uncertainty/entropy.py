@@ -1,4 +1,4 @@
-"""Generalized entropy of interval credal sets (paper Eq. 2).
+"""Generalized entropy of interval credal sets (CGNN paper Eq. 2).
 
 ``TU = max_{p in P} H(p)`` (upper entropy), ``AU = min_{p in P} H(p)`` (lower
 entropy), ``EU = TU - AU``. Entropies are in bits (log2).

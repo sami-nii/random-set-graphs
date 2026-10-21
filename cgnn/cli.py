@@ -140,9 +140,11 @@ def cmd_describe(args) -> int:
 
 
 def cmd_data(args) -> int:
+    from cgnn.config import global_defaults
     from cgnn.data import load_dataset
 
-    cfg = parse_overrides(args.set)
+    # same split as the experiments: configs/defaults.yaml unless overridden
+    cfg = {"split_seed": global_defaults().get("split_seed"), **parse_overrides(args.set)}
     if args.split_seed is not None:
         cfg["split_seed"] = args.split_seed
     bundle = load_dataset(args.dataset, cfg)
@@ -251,10 +253,21 @@ def cmd_sweep(args) -> int:
 
 def cmd_results(args) -> int:
     from cgnn.data import DATASETS
-    from cgnn.results import PAPER_DATASETS, PAPER_ROWS, fetch_runs, format_table, paper_table
+    from cgnn.results import (
+        PAPER_DATASETS,
+        PAPER_ROWS,
+        RSGNN_DATASETS,
+        RSGNN_ROWS,
+        fetch_runs,
+        format_rsgnn_table,
+        format_table,
+        paper_table,
+        rsgnn_table,
+    )
 
-    datasets = args.datasets or PAPER_DATASETS
-    rows_spec = [r for r in PAPER_ROWS if not args.methods or r[1] in args.methods]
+    rsgnn = args.table == "rsgnn"
+    datasets = args.datasets or (RSGNN_DATASETS if rsgnn else PAPER_DATASETS)
+    rows_spec = [r for r in (RSGNN_ROWS if rsgnn else PAPER_ROWS) if not args.methods or r[1] in args.methods]
     if args.methods:
         known = {r[1] for r in rows_spec}
         from cgnn.methods import get_method
@@ -272,8 +285,12 @@ def cmd_results(args) -> int:
         known_datasets=DATASETS.names(),
     )
     print(f"Fetched {len(runs)} runs.", file=sys.stderr)
-    table = paper_table(runs, datasets, rows_spec, aggregate=args.aggregate, k=args.k)
-    text = format_table(table, args.format)
+    if rsgnn:
+        table = rsgnn_table(runs, datasets, rows_spec, aggregate=args.aggregate, k=args.k)
+        text = format_rsgnn_table(table, args.format)
+    else:
+        table = paper_table(runs, datasets, rows_spec, aggregate=args.aggregate, k=args.k)
+        text = format_table(table, args.format)
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(text + "\n")
@@ -281,8 +298,10 @@ def cmd_results(args) -> int:
     print(text)
     if args.details:
         for label, per_ds in table.items():
-            for ds, s in per_ds.items():
-                if s is not None:
+            for ds, cell in per_ds.items():
+                for s in cell if isinstance(cell, tuple) else (cell,):
+                    if s is None:
+                        continue
                     print(
                         f"{label:20s} {ds:15s} comp={s.component or '-':12s} n={s.n} val={s.val_mean:.4f} runs={','.join(s.run_ids)}"
                     )
@@ -435,6 +454,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-m", "--methods", nargs="*")
     s.add_argument("-p", "--project", default=DEFAULT_PROJECT)
     s.add_argument("--entity", default=None)
+    s.add_argument(
+        "--table",
+        default="rsgnn",
+        choices=["rsgnn", "cgnn"],
+        help="rsgnn: RS-GNN paper Tab. 1 layout (default); cgnn: the CGNN paper's Table 2",
+    )
     s.add_argument("--aggregate", default="topk", choices=["topk", "group"])
     s.add_argument("-k", type=int, default=5, help="replicates for --aggregate topk")
     s.add_argument("--format", default="md", choices=["md", "csv", "latex"])

@@ -49,7 +49,7 @@ if has_step ood; then
             run cgnn sweep -m "$m" -d "$ds" -c "$TRAINABLE_RUNS" -p "$PROJECT" --gpus 1
         done
     done
-    # Table: validation-selected score component, mean +- std over the top-5 runs of each sweep
+    # Tab. 1 layout: per score, mean over the top-5 runs of each sweep by validation AUROC
     run cgnn results -p "$PROJECT" -d $DATASETS --format latex --out outputs/tables/ood.tex --details
 fi
 
@@ -69,7 +69,8 @@ if has_step ablation; then
             run cgnn sweep -m "$m" -d "$ds" -c "$TRAINABLE_RUNS" -p "$PROJECT" --gpus 1
         done
     done
-    run cgnn results -p "$PROJECT" -d cora roman_empire \
+    # Tab. 4 reports the best OOD AUROC over each sweep (-k 1)
+    run cgnn results -p "$PROJECT" -d cora roman_empire -k 1 \
         -m random_set random_set_singletons random_set_bce_only random_set_bce_mr --details
 fi
 

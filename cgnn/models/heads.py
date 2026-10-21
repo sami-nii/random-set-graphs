@@ -16,7 +16,7 @@ _ACTIVATIONS = {
 
 
 class CredalLayer(nn.Module):
-    """Credal head (paper Eq. 3-4): embedding -> interval probabilities ``(q_L, q_U)``.
+    """Credal head (CGNN paper Eq. 3-4): embedding -> interval probabilities ``(q_L, q_U)``.
 
     ``mh = MLP(z)`` gives midpoints ``m = g(.)`` and half-widths ``h = g'(.)``;
     ``[a_L, a_U] = [m - h - margin, m + h + margin]`` then Interval SoftMax.

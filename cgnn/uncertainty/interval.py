@@ -1,4 +1,4 @@
-"""Probability intervals: Interval SoftMax and reachability (paper Eq. 4).
+"""Probability intervals: Interval SoftMax and reachability (CGNN paper Eq. 4).
 
 Conventions (used everywhere in the package):
 - ``a_L, a_U``: lower/upper interval *logits*, shape ``[N, C]``.

@@ -1,4 +1,4 @@
-"""Collect W&B runs and build result tables (paper Table 2 protocol).
+"""Collect W&B runs and build result tables: RS-GNN paper Tab. 1 (``rsgnn_table``) or the CGNN paper's Table 2 (``paper_table``).
 
 Protocol implemented by :func:`summarize`:
 
@@ -29,7 +29,7 @@ from typing import Any
 # Keys that identify a replicate rather than a hyper-parameter configuration.
 REPLICATE_KEYS = {"seed", "backbone_rank", "split_seed", "cgnn_version", "wandb_version", "_wandb"}
 
-# (row label, method key, candidate components) -- rows of paper Table 2, in order.
+# (row label, method key, candidate components) -- rows of the CGNN paper's Table 2, in order.
 PAPER_ROWS: list[tuple[str, str, tuple[str, ...]]] = [
     ("Energy", "energy", ("",)),
     ("KNN", "knn", ("",)),
@@ -47,6 +47,37 @@ PAPER_ROWS: list[tuple[str, str, tuple[str, ...]]] = [
     ("CGNN only credal", "credal_LJ", ("EU", "AU")),
 ]
 PAPER_DATASETS = ["squirrel", "arxiv", "patents", "amazon_ratings", "roman_empire", "coauthor", "reddit2"]
+
+
+# RS-GNN paper, Tab. 1 [tab:ood]: (row label, method key, cell components). Cells with two components
+# are printed "first/second" (the paper's "total/epistemic"); Mean and Rank use the first value.
+RSGNN_ROWS: list[tuple[str, str, tuple[str, ...]]] = [
+    ("Energy", "energy", ("",)),
+    ("KNN", "knn", ("",)),
+    ("ODIN", "odin", ("",)),
+    ("Mahalanobis", "mahalanobis", ("",)),
+    ("GNNSafe", "gnnsafe", ("",)),
+    ("Classical ensemble", "ensemble", ("AU_classic", "EU_classic")),
+    ("JLDE", "knn_LJ", ("",)),
+    ("GEBM", "gebm", ("",)),
+    ("CaGCN", "cagcn", ("",)),
+    ("Credal final", "credal", ("AU", "EU")),
+    ("Credal ensemble", "ensemble", ("AU_credal", "EU_credal")),
+    ("Credal frozen", "frozen", ("AU", "EU")),
+    ("CredalLJ", "credal_LJ", ("AU", "EU")),
+    ("RS-GNN (ours)", "random_set", ("entropy", "credal")),
+]
+RSGNN_DATASETS = [
+    "chameleon",
+    "squirrel",
+    "arxiv",
+    "patents",
+    "amazon_ratings",
+    "roman_empire",
+    "coauthor",
+    "reddit2",
+    "cora",
+]
 
 
 @dataclass
@@ -265,3 +296,100 @@ def fetch_runs(
         if ds and method and wanted(ds, method):
             rows.append(_row_from_run(run, ds, method))
     return rows
+
+
+# ---------------------------------------------------------------------------
+# RS-GNN paper, Tab. 1
+# ---------------------------------------------------------------------------
+def rsgnn_table(
+    rows: Sequence[RunRow],
+    datasets: Sequence[str] = RSGNN_DATASETS,
+    table_rows: Sequence[tuple[str, str, tuple[str, ...]]] = RSGNN_ROWS,
+    **kwargs,
+) -> dict[str, dict[str, tuple[Summary | None, ...]]]:
+    """Every component of a cell is summarised on its own (top-k runs by that component's val AUROC)."""
+    return {
+        label: {ds: tuple(summarize(rows, method, ds, (c,), **kwargs) for c in comps) for ds in datasets}
+        for label, method, comps in table_rows
+    }
+
+
+def _first(cell: tuple[Summary | None, ...]) -> float | None:
+    return cell[0].test_mean if cell and cell[0] is not None else None
+
+
+def table_mean_rank(table: dict[str, dict[str, tuple[Summary | None, ...]]]) -> dict[str, tuple]:
+    """Mean AUROC and average rank (1 = best) across datasets, on the first value of each cell."""
+    labels = list(table)
+    datasets = list(next(iter(table.values()))) if table else []
+    ranks: dict[str, list[float]] = defaultdict(list)
+    for ds in datasets:
+        scored = sorted((v, lab) for lab in labels if (v := _first(table[lab][ds])) is not None)
+        for position, (_, lab) in enumerate(reversed(scored), start=1):
+            ranks[lab].append(position)
+    out = {}
+    for lab in labels:
+        values = [v for ds in datasets if (v := _first(table[lab][ds])) is not None]
+        mean = statistics.fmean(values) if values else None
+        rank = statistics.fmean(ranks[lab]) if ranks[lab] else None
+        out[lab] = (mean, rank)
+    return out
+
+
+def format_rsgnn_table(
+    table: dict[str, dict[str, tuple[Summary | None, ...]]], fmt: str = "md", scale: float = 100.0
+) -> str:
+    """Tab. 1 layout: "first/second" cells, best first value per column in bold, Mean and Rank columns."""
+    labels = list(table)
+    datasets = list(next(iter(table.values()))) if table else []
+    best = {
+        ds: max((v for lab in labels if (v := _first(table[lab][ds])) is not None), default=None)
+        for ds in datasets
+    }
+    mean_rank = table_mean_rank(table)
+    bold = (r"\textbf{", "}") if fmt == "latex" else ("**", "**")
+
+    def cell(lab: str, ds: str) -> str:
+        if all(s is None for s in table[lab][ds]):
+            return "-"
+        parts = ["-" if s is None else f"{s.test_mean * scale:.2f}" for s in table[lab][ds]]
+        text = "/".join(parts)
+        if best[ds] is not None and _first(table[lab][ds]) == best[ds]:
+            text = f"{bold[0]}{text}{bold[1]}"
+        return text
+
+    def agg(lab: str) -> list[str]:
+        mean, rank = mean_rank[lab]
+        return ["-" if mean is None else f"{mean * scale:.2f}", "-" if rank is None else f"{rank:.2f}"]
+
+    if fmt == "csv":
+        lines = ["method," + ",".join(datasets) + ",mean,rank"]
+        lines += [
+            f"{lab}," + ",".join(cell(lab, ds) for ds in datasets) + "," + ",".join(agg(lab))
+            for lab in labels
+        ]
+        return "\n".join(lines)
+    if fmt == "latex":
+        head = "Method & " + " & ".join(datasets) + r" & Mean & Rank \\"
+        body = [
+            f"{lab} & " + " & ".join(cell(lab, ds) for ds in datasets) + " & " + " & ".join(agg(lab)) + r" \\"
+            for lab in labels
+        ]
+        return "\n".join(
+            [
+                r"\begin{tabular}{l" + "c" * (len(datasets) + 2) + "}",
+                r"\toprule",
+                head,
+                r"\midrule",
+                *body,
+                r"\bottomrule",
+                r"\end{tabular}",
+            ]
+        )
+    head = "| Method | " + " | ".join(datasets) + " | Mean | Rank |"
+    sep = "|---|" + "---|" * (len(datasets) + 2)
+    body = [
+        f"| {lab} | " + " | ".join(cell(lab, ds) for ds in datasets) + " | " + " | ".join(agg(lab)) + " |"
+        for lab in labels
+    ]
+    return "\n".join([head, sep, *body])

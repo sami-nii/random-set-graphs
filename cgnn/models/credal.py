@@ -1,4 +1,4 @@
-"""Credal Graph Neural Networks (the paper's CGNN and its ablations).
+"""Credal Graph Neural Networks (CGNN, Tolloso et al.) and its ablations: the credal baselines.
 
 One configurable module. The method registry (`cgnn/methods/trainable.py`) maps
 every method key to a configuration:
@@ -15,7 +15,7 @@ Representation fed to the heads (``latent``):
 
 - ``"last"``: the standard backbone output ``z^L`` (no activation on the last layer).
 - ``"joint"``: ``[z^1 || ... || z^L]`` with the activation applied after *every*
-  layer (paper Eq. 14). ``joint_include_input=True`` also prepends the input ``z^0``.
+  layer (CGNN paper Eq. 14). ``joint_include_input=True`` also prepends the input ``z^0``.
 
 Losses: ``credal_loss`` (Eq. 9) + ``lambda_cls * CE(classifier)`` (dual head)
 (+ optional ``lambda_cons * consistency``). With ``detach_credal``

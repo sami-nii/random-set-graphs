@@ -1,4 +1,4 @@
-"""Leave-out-class OOD protocol (paper "OOD Detection Setting").
+"""Leave-out-class OOD protocol (CGNN paper, "OOD Detection Setting"; RS-GNN paper App. D.9).
 
 Given a graph with original labels and base train/val/test node masks:
 
@@ -63,7 +63,7 @@ def apply_leave_out_classes(
 
 
 def split_summary(data: Data) -> dict[str, int]:
-    """Node counts per split (the numbers in paper Table 1)."""
+    """Node counts per split (RS-GNN paper Tab. 10; CGNN paper Table 1)."""
     is_id = data.y.sum(dim=1) == 1
     out = {"train_id": int(data.train_mask.sum())}
     for split in ("val", "test"):

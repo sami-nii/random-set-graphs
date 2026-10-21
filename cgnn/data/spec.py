@@ -2,7 +2,7 @@
 
 A dataset is fully described by a :class:`DatasetSpec` living next to its raw
 loader in ``cgnn/data/sources/<name>.py``. The spec is the single source of
-truth for the leave-out-class OOD protocol (paper Table 1) and for the
+truth for the leave-out-class OOD protocol (RS-GNN paper Tab. 10) and for the
 metadata merged into sweep configs (``in_channels``, ``out_channels``, ...).
 
 ``kind="transductive"`` (default): one graph from ``load_raw``, with the

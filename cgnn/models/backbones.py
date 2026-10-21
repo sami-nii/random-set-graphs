@@ -88,7 +88,7 @@ def layerwise_embeddings(
     no JK); dropout between layers follows the backbone's ``dropout``. ``act_on_last=False`` matches the standard forward
     (the last layer returns pre-activation outputs, i.e. logits);
     ``act_on_last=True`` is what the trainable joint-latent credal models use.
-    ``include_input`` prepends the raw features ``z0 = x`` (paper Eq. 14).
+    ``include_input`` prepends the raw features ``z0 = x`` (CGNN paper Eq. 14).
     """
     num_layers = gnn.num_layers if num_layers is None else num_layers
     check_layerwise_support(gnn, num_layers)
